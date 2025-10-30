@@ -4,6 +4,10 @@ define('sincronizacion:views/sync-panel/panel', ['view'], function (Dep) {
 
         template: 'sincronizacion:sync-panel/panel',
 
+        setup: function () {
+            Dep.prototype.setup.call(this);
+        },
+
         data: function () {
             return {
                 testResult: this.testResult,
@@ -12,23 +16,26 @@ define('sincronizacion:views/sync-panel/panel', ['view'], function (Dep) {
         },
 
         events: {
-            'click [data-action="testConnection"]': function () {
+            'click [data-action="testConnection"]': function (e) {
+                e.preventDefault();
                 this.actionTestConnection();
             },
-            'click [data-action="runSync"]': function () {
+            'click [data-action="runSync"]': function (e) {
+                e.preventDefault();
                 this.actionRunSync();
             }
         },
 
         actionTestConnection: function () {
-            this.$el.find('[data-action="testConnection"]').prop('disabled', true);
+            var $btn = this.$el.find('[data-action="testConnection"]');
+            $btn.prop('disabled', true);
             
             Espo.Ui.notify(this.translate('pleaseWait', 'messages'));
 
             Espo.Ajax
                 .getRequest('SyncPanel/action/testConnection')
                 .then(function (response) {
-                    this.$el.find('[data-action="testConnection"]').prop('disabled', false);
+                    $btn.prop('disabled', false);
                     
                     if (response.success) {
                         this.testResult = {
@@ -50,21 +57,27 @@ define('sincronizacion:views/sync-panel/panel', ['view'], function (Dep) {
                     this.reRender();
                 }.bind(this))
                 .catch(function (xhr) {
-                    this.$el.find('[data-action="testConnection"]').prop('disabled', false);
-                    Espo.Ui.error(this.translate('Error') + ': ' + (xhr.statusText || 'Connection failed'));
+                    $btn.prop('disabled', false);
+                    var errorMsg = 'Error de conexión';
+                    if (xhr.responseJSON && xhr.responseJSON.message) {
+                        errorMsg = xhr.responseJSON.message;
+                    }
+                    Espo.Ui.error(errorMsg);
+                    console.error('Error testConnection:', xhr);
                 }.bind(this));
         },
 
         actionRunSync: function () {
             this.confirm('¿Ejecutar sincronización ahora?', function () {
-                this.$el.find('[data-action="runSync"]').prop('disabled', true);
+                var $btn = this.$el.find('[data-action="runSync"]');
+                $btn.prop('disabled', true);
                 
-                Espo.Ui.notify('Ejecutando sincronización...');
+                Espo.Ui.notify('Ejecutando sincronización...', 'info');
 
                 Espo.Ajax
                     .postRequest('SyncPanel/action/runSync')
                     .then(function (response) {
-                        this.$el.find('[data-action="runSync"]').prop('disabled', false);
+                        $btn.prop('disabled', false);
                         
                         if (response.success) {
                             this.syncResult = {
@@ -85,8 +98,13 @@ define('sincronizacion:views/sync-panel/panel', ['view'], function (Dep) {
                         this.reRender();
                     }.bind(this))
                     .catch(function (xhr) {
-                        this.$el.find('[data-action="runSync"]').prop('disabled', false);
-                        Espo.Ui.error(this.translate('Error') + ': ' + (xhr.statusText || 'Sync failed'));
+                        $btn.prop('disabled', false);
+                        var errorMsg = 'Error ejecutando sincronización';
+                        if (xhr.responseJSON && xhr.responseJSON.message) {
+                            errorMsg = xhr.responseJSON.message;
+                        }
+                        Espo.Ui.error(errorMsg);
+                        console.error('Error runSync:', xhr);
                     }.bind(this));
             }.bind(this));
         }

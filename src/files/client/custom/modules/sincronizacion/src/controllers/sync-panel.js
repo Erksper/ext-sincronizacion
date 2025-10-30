@@ -1,11 +1,17 @@
-define('sincronizacion:controllers/sync-panel', ['controller'], function (Dep) {
+define('sincronizacion:controllers/sync-panel', ['controllers/base'], function (Dep) {
 
     return Dep.extend({
 
-        defaultAction: 'index',
+        // Cuando se accede a #SyncPanel sin acción específica
+        actionIndex: function () {
+            this.actionList();
+        },
 
-        index: function () {
-            this.main('sincronizacion:views/sync-panel/panel');
+        // La acción principal que carga la vista
+        actionList: function () {
+            this.main('sincronizacion:views/sync-panel/panel', {
+                scope: 'SyncPanel'
+            });
         }
 
     });

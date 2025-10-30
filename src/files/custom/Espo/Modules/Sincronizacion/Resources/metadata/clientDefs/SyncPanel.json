@@ -1,6 +1,6 @@
 {
     "controller": "sincronizacion:controllers/sync-panel",
-    "view": "sincronizacion:views/sync-panel/panel",
     "iconClass": "fas fa-sync-alt", 
-    "color": "#28a745"
+    "color": "#28a745",
+    "defaultAction": "list"
 }
