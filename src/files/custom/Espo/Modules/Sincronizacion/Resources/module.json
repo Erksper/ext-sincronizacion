@@ -1,4 +1,8 @@
 {
+    "name": "Sincronizacion",
+    "version": "1.0.0",
+    "description": "Módulo de sincronización con base de datos externa",
+    "isCustom": true,
     "order": 50,
     "bundled": true,
     "jsTranspiled": true

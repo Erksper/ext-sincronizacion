@@ -1,0 +1,5 @@
+{
+    "controllers": {
+        "SyncPanel": "sincronizacion:controllers/sync-panel"
+    }
+}

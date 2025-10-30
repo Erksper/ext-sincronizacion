@@ -1,5 +1,6 @@
 {
-  "iconClass": "fas fa-sync-alt",
-  "color": "#28a745",
-  "controller": "sincronizacion:controllers/sync-panel"
+    "controller": "sincronizacion:controllers/sync-panel",
+    "view": "sincronizacion:views/sync-panel/panel",
+    "iconClass": "fas fa-sync-alt", 
+    "color": "#28a745"
 }

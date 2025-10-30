@@ -1,8 +1,8 @@
-define('custom:views/sync-panel/panel', ['view'], function (Dep) {
+define('sincronizacion:views/sync-panel/panel', ['view'], function (Dep) {
 
     return Dep.extend({
 
-        template: 'custom:sync-panel/panel',
+        template: 'sincronizacion:sync-panel/panel',
 
         data: function () {
             return {
@@ -49,9 +49,9 @@ define('custom:views/sync-panel/panel', ['view'], function (Dep) {
                     
                     this.reRender();
                 }.bind(this))
-                .catch(function () {
+                .catch(function (xhr) {
                     this.$el.find('[data-action="testConnection"]').prop('disabled', false);
-                    Espo.Ui.error(this.translate('Error'));
+                    Espo.Ui.error(this.translate('Error') + ': ' + (xhr.statusText || 'Connection failed'));
                 }.bind(this));
         },
 
@@ -84,9 +84,9 @@ define('custom:views/sync-panel/panel', ['view'], function (Dep) {
                         
                         this.reRender();
                     }.bind(this))
-                    .catch(function () {
+                    .catch(function (xhr) {
                         this.$el.find('[data-action="runSync"]').prop('disabled', false);
-                        Espo.Ui.error(this.translate('Error'));
+                        Espo.Ui.error(this.translate('Error') + ': ' + (xhr.statusText || 'Sync failed'));
                     }.bind(this));
             }.bind(this));
         }

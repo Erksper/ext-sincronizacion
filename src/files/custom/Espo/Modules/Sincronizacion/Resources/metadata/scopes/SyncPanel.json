@@ -1,15 +1,15 @@
 {
-  "entity": false,
-  "layouts": false,
-  "tab": true,
-  "acl": "boolean",
-  "aclPortal": false,
-  "customizable": false,
-  "importable": false,
-  "notifications": false,
-  "calendar": false,
-  "activity": false,
-  "stream": false,
-  "disabled": false,
-  "module": "Sincronizacion"
+    "entity": false,
+    "layouts": false,
+    "tab": true,
+    "acl": false,
+    "aclPortal": false,
+    "customizable": false,
+    "importable": false,
+    "notifications": false,
+    "calendar": false,
+    "activity": false,
+    "stream": false,
+    "disabled": false,
+    "module": "Sincronizacion"
 }

@@ -1,95 +1,58 @@
-define('custom:views/sync-panel/panel', ['view'], function (Dep) {
+<div class="panel panel-default">
+    <div class="panel-heading">
+        <h4 class="panel-title">Panel de Sincronización</h4>
+    </div>
+    <div class="panel-body">
+        <div class="button-container">
+            <button type="button" class="btn btn-primary" data-action="testConnection">
+                Probar Conexión
+            </button>
+            <button type="button" class="btn btn-success" data-action="runSync">
+                Ejecutar Sincronización
+            </button>
+        </div>
 
-    return Dep.extend({
+        {{#if testResult}}
+        <div class="margin-top-2x">
+            <h5>Resultado de Prueba de Conexión:</h5>
+            <div class="alert alert-{{#if testResult.success}}success{{else}}danger{{/if}}">
+                {{testResult.message}}
+                {{#if testResult.success}}
+                <div class="margin-top">
+                    <strong>Configuración:</strong> {{testResult.config}}<br>
+                    <strong>Usuarios encontrados:</strong> {{testResult.userCount}}<br>
+                    <strong>Equipos encontrados:</strong> {{testResult.teamCount}}
+                </div>
+                {{/if}}
+            </div>
+        </div>
+        {{/if}}
 
-        template: 'custom:sync-panel/panel',
+        {{#if syncResult}}
+        <div class="margin-top-2x">
+            <h5>Resultado de Sincronización:</h5>
+            <div class="alert alert-{{#if syncResult.success}}success{{else}}danger{{/if}}">
+                {{syncResult.message}}
+                <div class="margin-top">
+                    <strong>Ejecutado:</strong> {{syncResult.timestamp}}
+                </div>
+            </div>
+        </div>
+        {{/if}}
+    </div>
+</div>
 
-        data: function () {
-            return {
-                testResult: this.testResult,
-                syncResult: this.syncResult
-            };
-        },
-
-        events: {
-            'click [data-action="testConnection"]': function () {
-                this.actionTestConnection();
-            },
-            'click [data-action="runSync"]': function () {
-                this.actionRunSync();
-            }
-        },
-
-        actionTestConnection: function () {
-            this.$el.find('[data-action="testConnection"]').prop('disabled', true);
-            
-            Espo.Ui.notify(this.translate('pleaseWait', 'messages'));
-
-            Espo.Ajax
-                .getRequest('SyncPanel/action/testConnection')
-                .then(function (response) {
-                    this.$el.find('[data-action="testConnection"]').prop('disabled', false);
-                    
-                    if (response.success) {
-                        this.testResult = {
-                            success: true,
-                            config: response.data.config,
-                            userCount: response.data.userCount,
-                            teamCount: response.data.teamCount,
-                            message: response.message
-                        };
-                        Espo.Ui.success(response.message);
-                    } else {
-                        this.testResult = {
-                            success: false,
-                            message: response.message
-                        };
-                        Espo.Ui.error(response.message);
-                    }
-                    
-                    this.reRender();
-                }.bind(this))
-                .catch(function () {
-                    this.$el.find('[data-action="testConnection"]').prop('disabled', false);
-                    Espo.Ui.error(this.translate('Error'));
-                }.bind(this));
-        },
-
-        actionRunSync: function () {
-            this.confirm('¿Ejecutar sincronización ahora?', function () {
-                this.$el.find('[data-action="runSync"]').prop('disabled', true);
-                
-                Espo.Ui.notify('Ejecutando sincronización...');
-
-                Espo.Ajax
-                    .postRequest('SyncPanel/action/runSync')
-                    .then(function (response) {
-                        this.$el.find('[data-action="runSync"]').prop('disabled', false);
-                        
-                        if (response.success) {
-                            this.syncResult = {
-                                success: true,
-                                message: response.message,
-                                timestamp: new Date().toLocaleString()
-                            };
-                            Espo.Ui.success(response.message);
-                        } else {
-                            this.syncResult = {
-                                success: false,
-                                message: response.message,
-                                timestamp: new Date().toLocaleString()
-                            };
-                            Espo.Ui.error(response.message);
-                        }
-                        
-                        this.reRender();
-                    }.bind(this))
-                    .catch(function () {
-                        this.$el.find('[data-action="runSync"]').prop('disabled', false);
-                        Espo.Ui.error(this.translate('Error'));
-                    }.bind(this));
-            }.bind(this));
-        }
-
-    });
-});
+<style>
+.button-container {
+    margin-bottom: 20px;
+}
+.button-container .btn {
+    margin-right: 10px;
+}
+.margin-top {
+    margin-top: 10px;
+}
+.margin-top-2x {
+    margin-top: 20px;
+}
+</style>
