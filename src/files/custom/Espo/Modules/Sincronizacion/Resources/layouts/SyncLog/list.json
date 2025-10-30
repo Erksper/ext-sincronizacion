@@ -1,0 +1,26 @@
+[
+  {
+    "name": "syncDate",
+    "width": 15
+  },
+  {
+    "name": "entityType",
+    "width": 10
+  },
+  {
+    "name": "entityName",
+    "width": 20
+  },
+  {
+    "name": "action",
+    "width": 12
+  },
+  {
+    "name": "status",
+    "width": 10
+  },
+  {
+    "name": "message",
+    "width": 33
+  }
+]

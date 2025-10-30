@@ -1,0 +1,43 @@
+{
+  "labels": {
+    "Create ExternalDbConfig": "Create External DB Configuration",
+    "ExternalDbConfig": "External DB Config",
+    "External Database Configuration": "External Database Configuration"
+  },
+  "fields": {
+    "name": "Name",
+    "host": "Host/Server",
+    "port": "Port",
+    "database": "Database",
+    "username": "Username",
+    "password": "Password",
+    "notificationEmail": "Notification Email",
+    "isActive": "Active",
+    "lastSync": "Last Sync",
+    "lastSyncStatus": "Last Sync Status",
+    "description": "Description",
+    "createdAt": "Created At",
+    "modifiedAt": "Modified At",
+    "createdBy": "Created By",
+    "modifiedBy": "Modified By"
+  },
+  "links": {
+    "syncLogs": "Sync Logs"
+  },
+  "options": {
+    "lastSyncStatus": {
+      "success": "Success",
+      "warning": "With Warnings",
+      "error": "With Errors",
+      "never": "Never Executed"
+    }
+  },
+  "tooltips": {
+    "name": "Descriptive name to identify this configuration",
+    "host": "IP address or hostname of the database server",
+    "notificationEmail": "Email where error or warning notifications will be sent"
+  },
+  "messages": {
+    "onlyAdmins": "Only administrators can manage external DB configurations"
+  }
+}

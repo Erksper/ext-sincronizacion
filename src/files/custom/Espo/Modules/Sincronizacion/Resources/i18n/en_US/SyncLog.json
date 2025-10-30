@@ -1,0 +1,51 @@
+{
+  "labels": {
+    "Create SyncLog": "Create Log",
+    "SyncLog": "Sync Log",
+    "Sync Logs": "Sync Logs"
+  },
+  "fields": {
+    "name": "Name",
+    "syncDate": "Sync Date",
+    "entityType": "Entity Type",
+    "entityId": "Entity ID",
+    "entityName": "Entity Name",
+    "action": "Action",
+    "status": "Status",
+    "details": "Details",
+    "message": "Message",
+    "config": "Configuration",
+    "createdAt": "Created At"
+  },
+  "links": {
+    "config": "DB Configuration"
+  },
+  "options": {
+    "entityType": {
+      "User": "User",
+      "Team": "Team/Office",
+      "Role": "Role"
+    },
+    "action": {
+      "created": "Created",
+      "updated": "Updated",
+      "disabled": "Disabled",
+      "skipped": "Skipped",
+      "error": "Error"
+    },
+    "status": {
+      "success": "Success",
+      "warning": "Warning",
+      "error": "Error"
+    }
+  },
+  "filters": {
+    "today": "Today",
+    "errors": "Errors Only",
+    "warnings": "Warnings Only"
+  },
+  "boolFilters": {
+    "onlyErrors": "Errors Only",
+    "onlyWarnings": "Warnings Only"
+  }
+}

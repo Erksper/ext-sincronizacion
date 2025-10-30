@@ -1,0 +1,106 @@
+Listado de rutas de carpetas
+El n£mero de serie del volumen es 98EF-792C
+C:.
+|   src.txt
+|   
++---files
+|   |   Guia.md
+|   |   
+|   +---client
+|   |   \---custom
+|   |       \---modules
+|   |           \---sincronizacion
+|   |               +---res
+|   |               |   \---templates
+|   |               |       |   .dummy
+|   |               |       |   
+|   |               |       \---sync-panel
+|   |               |               panel.tpl
+|   |               |               
+|   |               \---src
+|   |                   +---controllers
+|   |                   |       sync-panel.js
+|   |                   |       
+|   |                   \---views
+|   |                       |   .dummy
+|   |                       |   
+|   |                       +---external-db-config
+|   |                       |       detail.js
+|   |                       |       
+|   |                       \---sync-panel
+|   |                               panel.js
+|   |                               
+|   \---custom
+|       \---Espo
+|           \---Modules
+|               \---Sincronizacion
+|                   +---Controllers
+|                   |       ExternalDbConfig.php
+|                   |       SyncLog.php
+|                   |       SyncPanel.php
+|                   |       
+|                   +---Hooks
+|                   |   \---ExternalDbConfig
+|                   |           BeforeSave.php
+|                   |           
+|                   +---Jobs
+|                   |       SincronizarDatosExternos.php
+|                   |       
+|                   +---Resources
+|                   |   |   module.json
+|                   |   |   routes.json
+|                   |   |   
+|                   |   +---i18n
+|                   |   |   +---en_US
+|                   |   |   |       ExternalDbConfig.json
+|                   |   |   |       SyncLog.json
+|                   |   |   |       SyncPanel.json
+|                   |   |   |       
+|                   |   |   \---es_ES
+|                   |   |           ExternalDbConfig.json
+|                   |   |           SyncLog.json
+|                   |   |           SyncPanel.json
+|                   |   |           
+|                   |   +---layouts
+|                   |   |   +---ExternalDbConfig
+|                   |   |   |       detail.json
+|                   |   |   |       list.json
+|                   |   |   |       
+|                   |   |   \---SyncLog
+|                   |   |           detail.json
+|                   |   |           list.json
+|                   |   |           
+|                   |   \---metadata
+|                   |       +---aclDefs
+|                   |       |       ExternalDbConfig.json
+|                   |       |       SyncLog.json
+|                   |       |       SyncPanel.json
+|                   |       |       
+|                   |       +---app
+|                   |       |       scheduledJobs.json
+|                   |       |       
+|                   |       +---clientDefs
+|                   |       |       ExternalDbConfig.json
+|                   |       |       SyncLog.json
+|                   |       |       SyncPanel.json
+|                   |       |       
+|                   |       +---entityDefs
+|                   |       |       ExternalDbConfig.json
+|                   |       |       SyncLog.json
+|                   |       |       SyncPanel.json
+|                   |       |       
+|                   |       +---recordDefs
+|                   |       |       ExternalDbConfig.json
+|                   |       |       
+|                   |       \---scopes
+|                   |               ExternalDbConfig.json
+|                   |               SyncLog.json
+|                   |               SyncPanel.json
+|                   |               
+|                   \---Services
+|                           ExternalDbConfig.php
+|                           
+\---scripts
+        AfterInstall.php
+        AfterUninstall.php
+        

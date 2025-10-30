@@ -1,0 +1,16 @@
+{
+  "entity": true,
+  "layouts": true,
+  "tab": true,
+  "acl": true,
+  "aclPortal": false,
+  "customizable": true,
+  "importable": false,
+  "notifications": false,
+  "calendar": false,
+  "activity": false,
+  "object": false,
+  "stream": false,
+  "isCustom": true,
+  "module": "Sincronizacion"
+}

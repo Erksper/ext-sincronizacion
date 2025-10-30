@@ -1,0 +1,10 @@
+{
+  "mandatory": {
+    "readOwnership": "no",
+    "editOwnership": "no"
+  },
+  "levels": {
+    "read": ["admin"],
+    "edit": ["admin"]
+  }
+}

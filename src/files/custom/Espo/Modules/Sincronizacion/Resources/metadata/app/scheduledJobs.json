@@ -1,0 +1,8 @@
+{
+  "Sincronizar Datos Externos": {
+    "jobClassName": "Espo\\Modules\\Sincronizacion\\Jobs\\SincronizarDatosExternos",
+    "name": "Sincronizar Usuarios y Teams desde BD Externa",
+    "isSystem": false,
+    "scheduling": "*/15 * * * *"
+  }
+}

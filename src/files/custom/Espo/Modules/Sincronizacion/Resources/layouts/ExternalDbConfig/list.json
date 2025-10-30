@@ -1,0 +1,26 @@
+[
+  {
+    "name": "name",
+    "width": 25
+  },
+  {
+    "name": "host",
+    "width": 20
+  },
+  {
+    "name": "database",
+    "width": 15
+  },
+  {
+    "name": "isActive",
+    "width": 10
+  },
+  {
+    "name": "lastSyncStatus",
+    "width": 15
+  },
+  {
+    "name": "lastSync",
+    "width": 15
+  }
+]

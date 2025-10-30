@@ -1,0 +1,51 @@
+{
+  "labels": {
+    "Create SyncLog": "Crear Log",
+    "SyncLog": "Log de Sincronización",
+    "Sync Logs": "Logs de Sincronización"
+  },
+  "fields": {
+    "name": "Nombre",
+    "syncDate": "Fecha Sincronización",
+    "entityType": "Tipo de Entidad",
+    "entityId": "ID Entidad",
+    "entityName": "Nombre Entidad",
+    "action": "Acción",
+    "status": "Estado",
+    "details": "Detalles",
+    "message": "Mensaje",
+    "config": "Configuración",
+    "createdAt": "Fecha Creación"
+  },
+  "links": {
+    "config": "Configuración BD"
+  },
+  "options": {
+    "entityType": {
+      "User": "Usuario",
+      "Team": "Equipo/Oficina",
+      "Role": "Rol"
+    },
+    "action": {
+      "created": "Creado",
+      "updated": "Actualizado",
+      "disabled": "Desactivado",
+      "skipped": "Omitido",
+      "error": "Error"
+    },
+    "status": {
+      "success": "Exitoso",
+      "warning": "Advertencia",
+      "error": "Error"
+    }
+  },
+  "filters": {
+    "today": "Hoy",
+    "errors": "Solo Errores",
+    "warnings": "Solo Advertencias"
+  },
+  "boolFilters": {
+    "onlyErrors": "Solo Errores",
+    "onlyWarnings": "Solo Advertencias"
+  }
+}

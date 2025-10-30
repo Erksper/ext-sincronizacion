@@ -1,0 +1,43 @@
+{
+  "labels": {
+    "Create ExternalDbConfig": "Crear Configuración de BD Externa",
+    "ExternalDbConfig": "Configuración BD Externa",
+    "External Database Configuration": "Configuración Base de Datos Externa"
+  },
+  "fields": {
+    "name": "Nombre",
+    "host": "Host/Servidor",
+    "port": "Puerto",
+    "database": "Base de Datos",
+    "username": "Usuario",
+    "password": "Contraseña",
+    "notificationEmail": "Email de Notificaciones",
+    "isActive": "Activa",
+    "lastSync": "Última Sincronización",
+    "lastSyncStatus": "Estado Última Sync",
+    "description": "Descripción",
+    "createdAt": "Fecha Creación",
+    "modifiedAt": "Fecha Modificación",
+    "createdBy": "Creado Por",
+    "modifiedBy": "Modificado Por"
+  },
+  "links": {
+    "syncLogs": "Logs de Sincronización"
+  },
+  "options": {
+    "lastSyncStatus": {
+      "success": "Exitosa",
+      "warning": "Con Advertencias",
+      "error": "Con Errores",
+      "never": "Nunca Ejecutada"
+    }
+  },
+  "tooltips": {
+    "name": "Nombre descriptivo para identificar esta configuración",
+    "host": "Dirección IP o hostname del servidor de base de datos",
+    "notificationEmail": "Correo donde se enviarán notificaciones de errores o warnings"
+  },
+  "messages": {
+    "onlyAdmins": "Solo administradores pueden gestionar configuraciones de BD externa"
+  }
+}

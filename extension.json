@@ -1,9 +1,9 @@
 {
-    "module": "{@name}",
-    "name": "{@nameLabel}",
-    "description": "{@description}",
-    "author": "{@author}",
-    "bundled": {@bundled},
+    "module": "Sincronizacion",
+    "name": "sincronizacion",
+    "description": "Modulo para la sincronizacion entre 21 Online y EspoCRM.",
+    "author": "Sebastian Silva",
+    "bundled": true,
     "acceptableVersions": [
         ">=9.1.0"
     ],

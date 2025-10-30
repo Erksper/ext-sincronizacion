@@ -1,0 +1,39 @@
+{
+  "controller": "controllers/record",
+  "iconClass": "fas fa-database",
+  "color": "#3498db",
+  "createDisabled": false,
+  "searchPanelDisabled": false,
+  "views": {
+    "detail": "custom:views/external-db-config/detail"
+  },
+  "filterList": [
+    "active"
+  ],
+  "boolFilterList": [
+    "onlyActive"
+  ],
+  "defaultFilterData": {
+    "boolFilterList": ["onlyActive"]
+  },
+  "menu": {
+    "detail": {
+      "buttons": [
+        {
+          "label": "Ejecutar Sincronización",
+          "name": "runSync",
+          "action": "runSync",
+          "style": "success",
+          "acl": "edit"
+        },
+        {
+          "label": "Probar Conexión",
+          "name": "testConnection",
+          "action": "testConnection",
+          "style": "default",
+          "acl": "edit"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,48 @@
+[
+  {
+    "rows": [
+      [
+        {
+          "name": "syncDate"
+        },
+        {
+          "name": "status"
+        }
+      ],
+      [
+        {
+          "name": "entityType"
+        },
+        {
+          "name": "action"
+        }
+      ],
+      [
+        {
+          "name": "entityId"
+        },
+        {
+          "name": "entityName"
+        }
+      ],
+      [
+        {
+          "name": "message",
+          "fullWidth": true
+        }
+      ],
+      [
+        {
+          "name": "details",
+          "fullWidth": true
+        }
+      ],
+      [
+        {
+          "name": "config"
+        },
+        false
+      ]
+    ]
+  }
+]

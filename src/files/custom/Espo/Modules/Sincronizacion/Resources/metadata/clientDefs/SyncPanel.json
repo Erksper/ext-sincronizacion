@@ -1,0 +1,5 @@
+{
+  "iconClass": "fas fa-sync-alt",
+  "color": "#28a745",
+  "controller": "sincronizacion:controllers/sync-panel"
+}

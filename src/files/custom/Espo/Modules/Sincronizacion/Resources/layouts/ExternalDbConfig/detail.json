@@ -1,0 +1,52 @@
+[
+  {
+    "rows": [
+      [
+        {
+          "name": "name"
+        },
+        {
+          "name": "isActive"
+        }
+      ],
+      [
+        {
+          "name": "host"
+        },
+        {
+          "name": "port"
+        }
+      ],
+      [
+        {
+          "name": "database"
+        },
+        {
+          "name": "username"
+        }
+      ],
+      [
+        {
+          "name": "password"
+        },
+        {
+          "name": "notificationEmail"
+        }
+      ],
+      [
+        {
+          "name": "lastSync"
+        },
+        {
+          "name": "lastSyncStatus"
+        }
+      ],
+      [
+        {
+          "name": "description",
+          "fullWidth": true
+        }
+      ]
+    ]
+  }
+]

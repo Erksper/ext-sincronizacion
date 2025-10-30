@@ -1,0 +1,114 @@
+{
+  "fields": {
+    "name": {
+      "type": "varchar",
+      "required": true,
+      "readOnly": true,
+      "maxLength": 255,
+      "view": "views/fields/varchar"
+    },
+    "syncDate": {
+      "type": "datetime",
+      "required": true,
+      "readOnly": true,
+      "default": "javascript: return this.dateTime.getNow();"
+    },
+    "entityType": {
+      "type": "enum",
+      "required": true,
+      "options": ["User", "Team", "Role"],
+      "readOnly": true,
+      "style": {
+        "User": "primary",
+        "Team": "success",
+        "Role": "warning"
+      },
+      "default": "User"
+    },
+    "entityId": {
+      "type": "varchar",
+      "maxLength": 24,
+      "readOnly": true,
+      "view": "views/fields/varchar"
+    },
+    "entityName": {
+      "type": "varchar",
+      "maxLength": 255,
+      "readOnly": true,
+      "view": "views/fields/varchar"
+    },
+    "action": {
+      "type": "enum",
+      "required": true,
+      "options": ["created", "updated", "disabled", "skipped", "error"],
+      "readOnly": true,
+      "style": {
+        "created": "success",
+        "updated": "info",
+        "disabled": "warning",
+        "skipped": "default",
+        "error": "danger"
+      },
+      "default": "created"
+    },
+    "status": {
+      "type": "enum",
+      "required": true,
+      "options": ["success", "warning", "error"],
+      "default": "success",
+      "readOnly": true,
+      "style": {
+        "success": "success",
+        "warning": "warning",
+        "error": "danger"
+      }
+    },
+    "details": {
+      "type": "text",
+      "readOnly": true,
+      "rows": 6,
+      "view": "views/fields/text"
+    },
+    "message": {
+      "type": "varchar",
+      "maxLength": 500,
+      "readOnly": true,
+      "view": "views/fields/varchar"
+    },
+    "config": {
+      "type": "link",
+      "view": "views/fields/link"
+    },
+    "createdAt": {
+      "type": "datetime",
+      "readOnly": true,
+      "notStorable": false
+    }
+  },
+  "links": {
+    "config": {
+      "type": "belongsTo",
+      "entity": "ExternalDbConfig",
+      "foreign": "syncLogs"
+    }
+  },
+  "collection": {
+    "orderBy": "syncDate",
+    "order": "desc",
+    "textFilterFields": ["name", "entityName", "message"]
+  },
+  "indexes": {
+    "syncDate": {
+      "columns": ["syncDate"]
+    },
+    "entityType": {
+      "columns": ["entityType"]
+    },
+    "status": {
+      "columns": ["status"]
+    },
+    "entityId": {
+      "columns": ["entityId"]
+    }
+  }
+}

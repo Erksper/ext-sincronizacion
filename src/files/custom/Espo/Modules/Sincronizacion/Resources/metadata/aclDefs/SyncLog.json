@@ -1,0 +1,13 @@
+{
+  "mandatory": {
+    "readOwnership": "no",
+    "editOwnership": "no",
+    "deleteOwnership": "no"
+  },
+  "levels": {
+    "read": ["admin"],
+    "edit": ["no"],
+    "delete": ["admin"],
+    "create": ["no"]
+  }
+}

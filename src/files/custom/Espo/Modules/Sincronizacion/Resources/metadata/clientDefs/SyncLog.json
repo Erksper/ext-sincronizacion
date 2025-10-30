@@ -1,0 +1,21 @@
+{
+  "controller": "controllers/record",
+  "iconClass": "fas fa-history",
+  "color": "#95a5a6",
+  "createDisabled": true,
+  "editDisabled": true,
+  "removeDisabled": true,
+  "mergeDisabled": true,
+  "searchPanelDisabled": false,
+  "filterList": [
+    "today",
+    "errors",
+    "warnings"
+  ],
+  "boolFilterList": [
+    "onlyErrors",
+    "onlyWarnings"
+  ],
+  "defaultOrderBy": "syncDate",
+  "defaultOrder": "desc"
+}
