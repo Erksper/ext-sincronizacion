@@ -424,7 +424,7 @@ class SincronizarDatosExternos implements JobDataLess
                     $idsExternos[] = $userId;
                     
                     // Verificar que el Team (afiliado) existe
-                    $teamId = $usuario['idAfiliados'];
+                    $teamId = (string)$usuario['idAfiliados'];
                     $team = $this->entityManager->getEntityById('Team', $teamId);
                     
                     if (!$team) {
@@ -507,65 +507,100 @@ class SincronizarDatosExternos implements JobDataLess
                         $needsUpdate = false;
                         $changes = [];
 
-                        // Comparar cada campo individualmente
-                        if ($user->get('firstName') !== $usuario['nombre']) {
-                            $user->set('firstName', $usuario['nombre']);
-                            $changes[] = 'nombre';
+                        // Comparar cada campo individualmente con normalización
+                        
+                        // Normalizar valores para comparación correcta
+                        $nombreExterno = trim($usuario['nombre']);
+                        $apellidoExterno = trim($usuario['apellidoP']);
+                        $usernameExterno = trim($usuario['username']);
+                        $emailExterno = trim($usuario['email'] ?? '');
+                        $telefonoExterno = trim($usuario['telMovil'] ?? '');
+                        
+                        $nombreActual = trim($user->get('firstName') ?? '');
+                        $apellidoActual = trim($user->get('lastName') ?? '');
+                        $usernameActual = trim($user->get('userName') ?? '');
+                        $emailActual = trim($user->get('emailAddress') ?? '');
+                        $telefonoActual = trim($user->get('phoneNumber') ?? '');
+
+                        // Comparar nombre
+                        if ($nombreActual !== $nombreExterno) {
+                            $user->set('firstName', $nombreExterno);
+                            $changes[] = "nombre ('{$nombreActual}' -> '{$nombreExterno}')";
                             $needsUpdate = true;
                         }
 
-                        if ($user->get('lastName') !== $usuario['apellidoP']) {
-                            $user->set('lastName', $usuario['apellidoP']);
-                            $changes[] = 'apellido';
+                        // Comparar apellido
+                        if ($apellidoActual !== $apellidoExterno) {
+                            $user->set('lastName', $apellidoExterno);
+                            $changes[] = "apellido ('{$apellidoActual}' -> '{$apellidoExterno}')";
                             $needsUpdate = true;
                         }
 
-                        if ($user->get('userName') !== $usuario['username']) {
-                            $user->set('userName', $usuario['username']);
-                            $changes[] = 'username';
+                        // Comparar username
+                        if ($usernameActual !== $usernameExterno) {
+                            $user->set('userName', $usernameExterno);
+                            $changes[] = "username ('{$usernameActual}' -> '{$usernameExterno}')";
                             $needsUpdate = true;
                         }
 
-                        $emailExterno = $usuario['email'] ?? '';
-                        if ($user->get('emailAddress') !== $emailExterno) {
+                        // Comparar email (solo si no está vacío en BD externa)
+                        if (!empty($emailExterno) && $emailActual !== $emailExterno) {
                             $user->set('emailAddress', $emailExterno);
-                            $changes[] = 'email';
+                            $changes[] = "email ('{$emailActual}' -> '{$emailExterno}')";
                             $needsUpdate = true;
                         }
 
-                        $telefonoExterno = $usuario['telMovil'] ?? '';
-                        if ($user->get('phoneNumber') !== $telefonoExterno) {
+                        // Comparar teléfono (solo si no está vacío en BD externa)
+                        if (!empty($telefonoExterno) && $telefonoActual !== $telefonoExterno) {
                             $user->set('phoneNumber', $telefonoExterno);
-                            $changes[] = 'teléfono';
+                            $changes[] = "teléfono ('{$telefonoActual}' -> '{$telefonoExterno}')";
                             $needsUpdate = true;
                         }
 
-                        // CORRECCIÓN: Comparar defaultTeamId correctamente
-                        $currentDefaultTeam = $user->get('defaultTeamId');
-                        $currentDefaultTeamId = '';
+                        // Comparar defaultTeamId - Normalizar tipos para comparación
+                        $currentDefaultTeamId = $user->get('defaultTeamId');
 
-                        if ($currentDefaultTeam) {
-                            if (is_object($currentDefaultTeam)) {
-                                $currentDefaultTeamId = $currentDefaultTeam->getId();
+                        // Extraer el ID del team actual y convertir a string
+                        $currentTeamIdString = '';
+                        if ($currentDefaultTeamId !== null && $currentDefaultTeamId !== '') {
+                            if (is_object($currentDefaultTeamId)) {
+                                // Si es un objeto Entity, obtener su ID
+                                $currentTeamIdString = (string)$currentDefaultTeamId->getId();
                             } else {
-                                $currentDefaultTeamId = $currentDefaultTeam;
+                                // Si es string o int, convertir a string
+                                $currentTeamIdString = (string)$currentDefaultTeamId;
                             }
                         }
 
-                        if ($currentDefaultTeamId !== $teamId) {
-                            $user->set('defaultTeamId', $teamId);
-                            $changes[] = 'team por defecto';
+                        // Asegurar que $teamId también sea string
+                        $teamIdString = (string)$teamId;
+
+                        // Comparar los IDs como strings
+                        if ($currentTeamIdString !== $teamIdString) {
+                            $user->set('defaultTeamId', $teamIdString);
+                            $changes[] = "team por defecto ('{$currentTeamIdString}' -> '{$teamIdString}')";
                             $needsUpdate = true;
                         }
+
+                        // Verificar si el usuario está activo
+                        if (!$user->get('isActive')) {
+                            $user->set('isActive', true);
+                            $changes[] = "reactivado";
+                            $needsUpdate = true;
+                        }
+
+                        // NO ACTUALIZAR PASSWORD en usuarios existentes
+                        // La contraseña solo se establece al crear el usuario
+                        // Si necesitas forzar actualización de password, hazlo manualmente
 
                         if ($needsUpdate) {
                             $this->entityManager->saveEntity($user);
                             $summary['users']['updated']++;
                             
-                            // LOG DE ACTUALIZACIÓN EXITOSA
+                            // LOG DE ACTUALIZACIÓN EXITOSA con detalles
                             $this->addLog('updated', 'User', $userId, $usuario['username'], 'success', 
-                                        "Usuario actualizado - Campos modificados: " . implode(', ', $changes), $configId);
-                            error_log("[SyncJob] Usuario actualizado: {$userId} - Campos: " . implode(', ', $changes));
+                                        "Usuario actualizado - Cambios: " . implode(', ', $changes), $configId);
+                            error_log("[SyncJob] Usuario actualizado: {$userId} - " . implode(', ', $changes));
                         } else {
                             $summary['users']['no_changes']++;
                             // SOLO CONTAR, NO LOG INDIVIDUAL PARA SIN CAMBIOS
