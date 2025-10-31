@@ -177,7 +177,8 @@ class SincronizarDatosExternos implements JobDataLess
                     error_log("[SyncJob] Rol creado: {$nombreRol}");
                 } else {
                     $summary['roles']['existing']++;
-                    error_log("[SyncJob] Rol existente: {$nombreRol}");
+                    // SOLO CONTAR, NO LOG INDIVIDUAL
+                    // error_log("[SyncJob] Rol existente: {$nombreRol}");
                 }
                 
             } catch (\Exception $e) {
@@ -219,11 +220,15 @@ class SincronizarDatosExternos implements JobDataLess
                     if ($cla->get('name') !== $nombre) {
                         $cla->set('name', $nombre);
                         $this->entityManager->saveEntity($cla);
+                        
+                        // LOG DE CLA ACTUALIZADO
+                        $this->addLog('updated', 'Team', $claId, $nombre, 'success', 
+                                     "CLA '{$nombre}' actualizado", $configId);
                         error_log("[SyncJob] CLA actualizado: {$claId} - {$nombre}");
+                    } else {
+                        // SOLO CONTAR, NO LOG INDIVIDUAL
+                        $summary['clas']['existing']++;
                     }
-                    
-                    $summary['clas']['existing']++;
-                    error_log("[SyncJob] CLA existente: {$claId} - {$nombre}");
                 }
                 
             } catch (\Exception $e) {
@@ -309,6 +314,7 @@ class SincronizarDatosExternos implements JobDataLess
                                      'Team actualizado', $configId);
                         error_log("[SyncJob] Team actualizado: {$teamId} - {$afiliado['nombre']}");
                     }
+                    // SOLO CONTAR, NO LOG INDIVIDUAL PARA SIN CAMBIOS
                 }
                 
             } catch (\Exception $e) {
@@ -490,60 +496,79 @@ class SincronizarDatosExternos implements JobDataLess
                         
                         $this->entityManager->saveEntity($user);
                         $summary['users']['created']++;
+                        
+                        // LOG DE CREACIÓN EXITOSA
+                        $this->addLog('created', 'User', $userId, $usuario['username'], 'success', 
+                                     "Usuario creado exitosamente - Rol: {$nombreRol}, Team: {$teamId}", $configId);
                         error_log("[SyncJob] Usuario creado: {$userId}");
                         
                     } else {
                         // USUARIO EXISTENTE - Verificar cambios antes de actualizar
                         $needsUpdate = false;
                         $changes = [];
-                        
+
                         // Comparar cada campo individualmente
                         if ($user->get('firstName') !== $usuario['nombre']) {
                             $user->set('firstName', $usuario['nombre']);
                             $changes[] = 'nombre';
                             $needsUpdate = true;
                         }
-                        
+
                         if ($user->get('lastName') !== $usuario['apellidoP']) {
                             $user->set('lastName', $usuario['apellidoP']);
                             $changes[] = 'apellido';
                             $needsUpdate = true;
                         }
-                        
+
                         if ($user->get('userName') !== $usuario['username']) {
                             $user->set('userName', $usuario['username']);
                             $changes[] = 'username';
                             $needsUpdate = true;
                         }
-                        
+
                         $emailExterno = $usuario['email'] ?? '';
                         if ($user->get('emailAddress') !== $emailExterno) {
                             $user->set('emailAddress', $emailExterno);
                             $changes[] = 'email';
                             $needsUpdate = true;
                         }
-                        
+
                         $telefonoExterno = $usuario['telMovil'] ?? '';
                         if ($user->get('phoneNumber') !== $telefonoExterno) {
                             $user->set('phoneNumber', $telefonoExterno);
                             $changes[] = 'teléfono';
                             $needsUpdate = true;
                         }
-                        
-                        if ($user->get('defaultTeamId') !== $teamId) {
+
+                        // CORRECCIÓN: Comparar defaultTeamId correctamente
+                        $currentDefaultTeam = $user->get('defaultTeamId');
+                        $currentDefaultTeamId = '';
+
+                        if ($currentDefaultTeam) {
+                            if (is_object($currentDefaultTeam)) {
+                                $currentDefaultTeamId = $currentDefaultTeam->getId();
+                            } else {
+                                $currentDefaultTeamId = $currentDefaultTeam;
+                            }
+                        }
+
+                        if ($currentDefaultTeamId !== $teamId) {
                             $user->set('defaultTeamId', $teamId);
                             $changes[] = 'team por defecto';
                             $needsUpdate = true;
                         }
-                        
+
                         if ($needsUpdate) {
                             $this->entityManager->saveEntity($user);
                             $summary['users']['updated']++;
+                            
+                            // LOG DE ACTUALIZACIÓN EXITOSA
+                            $this->addLog('updated', 'User', $userId, $usuario['username'], 'success', 
+                                        "Usuario actualizado - Campos modificados: " . implode(', ', $changes), $configId);
                             error_log("[SyncJob] Usuario actualizado: {$userId} - Campos: " . implode(', ', $changes));
                         } else {
                             $summary['users']['no_changes']++;
-                            // Log opcional para debugging
-                            // error_log("[SyncJob] Usuario sin cambios: {$userId}");
+                            // SOLO CONTAR, NO LOG INDIVIDUAL PARA SIN CAMBIOS
                         }
                     }
                     
@@ -588,6 +613,10 @@ class SincronizarDatosExternos implements JobDataLess
                         // Agregar las nuevas relaciones
                         $teamRelation->relate($team);
                         $teamRelation->relate($cla);
+                        
+                        // LOG DE ACTUALIZACIÓN DE TEAMS
+                        $this->addLog('teams_updated', 'User', $userId, $usuario['username'], 'success', 
+                                     "Teams actualizados - Afiliado: {$teamId}, CLA: {$claId}", $configId);
                         
                         if (!$isNew) {
                             error_log("[SyncJob] Teams actualizados para usuario: {$userId}");
@@ -646,16 +675,20 @@ class SincronizarDatosExternos implements JobDataLess
                             $roleRelation->relate($rol);
                             error_log("[SyncJob] Rol agregado para usuario {$userId}: {$nombreRol}");
                         }
-                        
-                        if (!$isNew) {
-                            error_log("[SyncJob] Roles sincronizados para usuario: {$userId} - Se agregó: {$nombreRol}, se mantuvieron roles no importados: " . count($rolesNoImportados));
-                        }
                     }
                     
                     // Log de roles no importados mantenidos
                     if (count($rolesNoImportados) > 0 && $needsRoleUpdate) {
                         $nombresRolesNoImportados = implode(', ', array_values(array_map(function($r) { return $r->get('name'); }, $rolesNoImportados)));
+                        
+                        // LOG DE ACTUALIZACIÓN DE ROLES CON MANTENIMIENTO
+                        $this->addLog('roles_updated', 'User', $userId, $usuario['username'], 'success', 
+                                     "Roles sincronizados - Nuevo rol: {$nombreRol}, Roles mantenidos: {$nombresRolesNoImportados}", $configId);
                         error_log("[SyncJob] Usuario {$userId} mantuvo roles no importados: {$nombresRolesNoImportados}");
+                    } elseif ($needsRoleUpdate) {
+                        // LOG DE ACTUALIZACIÓN DE ROLES SIN MANTENIMIENTO
+                        $this->addLog('roles_updated', 'User', $userId, $usuario['username'], 'success', 
+                                     "Roles sincronizados - Nuevo rol: {$nombreRol}", $configId);
                     }
                     
                     // Log de progreso cada 25 usuarios
@@ -668,6 +701,7 @@ class SincronizarDatosExternos implements JobDataLess
                     $summary['users']['errors']++;
                     $mensaje = "Error procesando usuario: " . $e->getMessage();
                     $this->addIncidencia('sync_error', 'User', $usuario['id'] ?? null, $usuario['username'] ?? 'Desconocido', $mensaje);
+                    $this->addLog('error', 'User', $usuario['id'] ?? null, $usuario['username'] ?? 'Desconocido', 'error', $mensaje, $configId);
                     error_log("[SyncJob] {$mensaje}");
                 }
             }
