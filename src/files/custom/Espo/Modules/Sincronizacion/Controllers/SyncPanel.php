@@ -106,6 +106,10 @@ class SyncPanel extends Base
                 ];
             }
             
+            // Aumentar límites de tiempo y memoria
+            set_time_limit(600); // 10 minutos
+            ini_set('memory_limit', '512M');
+            
             $job = $this->injectableFactory->create(
                 'Espo\\Modules\\Sincronizacion\\Jobs\\SincronizarDatosExternos'
             );
