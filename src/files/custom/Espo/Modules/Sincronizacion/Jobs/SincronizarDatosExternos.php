@@ -5,31 +5,23 @@ namespace Espo\Modules\Sincronizacion\Jobs;
 use Espo\Core\Job\JobDataLess;
 use Espo\Core\InjectableFactory;
 use Espo\ORM\EntityManager;
+use Espo\Core\Utils\PasswordHash;
+use Espo\Modules\Sincronizacion\Handlers\TeamHandler;
+use Espo\Modules\Sincronizacion\Handlers\UserHandler;
+use Espo\Modules\Sincronizacion\Handlers\ImageHandler;
 use PDO;
 use PDOException;
 
 /**
  * Job programado que sincroniza usuarios y teams desde una base de datos externa
+ * 
+ * REFACTORIZADO - Versión modular con separación de responsabilidades
  */
 class SincronizarDatosExternos implements JobDataLess
 {
     private EntityManager $entityManager;
     private InjectableFactory $injectableFactory;
     private array $incidencias = [];
-    
-    // CLAs fijos del sistema
-    private const CLAS = [
-        0 => 'Territorio Nacional',
-        1 => 'Caracas Libertador',
-        2 => 'Caracas Noreste',
-        3 => 'Caracas Sureste',
-        4 => 'Centro Occidente',
-        5 => 'Llano Andes',
-        6 => 'Oriente Insular',
-        7 => 'Oriente Norte',
-        8 => 'Oriente Sur',
-        9 => 'Zulia'
-    ];
     
     public function __construct(
         EntityManager $entityManager,
@@ -41,52 +33,79 @@ class SincronizarDatosExternos implements JobDataLess
 
     public function run(): void
     {
+        $GLOBALS['log']->info('[SyncJob] ========== INICIANDO SINCRONIZACIÓN ==========');
+        error_log('[SyncJob] ========== INICIANDO SINCRONIZACIÓN ==========');
+        
         try {
-            // SOLUCIÓN TIMEOUT: Aumentar límites
+            // Aumentar límites de ejecución
             set_time_limit(0);
             ini_set('memory_limit', '512M');
             ini_set('max_execution_time', 0);
             
-            error_log('[SyncJob] ========== INICIANDO SINCRONIZACIÓN ==========');
-            
             // 1. Obtener configuración activa
+            $GLOBALS['log']->info('[SyncJob] Obteniendo configuración activa...');
             $config = $this->getActiveConfig();
             if (!$config) {
+                $GLOBALS['log']->error('[SyncJob] No hay configuración activa de BD externa');
                 error_log('[SyncJob] No hay configuración activa de BD externa');
                 return;
             }
             
+            $GLOBALS['log']->info("[SyncJob] Usando configuración: {$config['name']}");
             error_log("[SyncJob] Usando configuración: {$config['name']}");
             
             // 2. Conectar a la base de datos externa
+            $GLOBALS['log']->info('[SyncJob] Conectando a BD externa...');
+            error_log('[SyncJob] Conectando a BD externa...');
+            
             $pdo = $this->connectToExternalDb($config);
             if (!$pdo) {
                 $this->updateConfigStatus($config['id'], 'error');
+                $GLOBALS['log']->error('[SyncJob] No se pudo conectar a la BD externa');
                 error_log('[SyncJob] No se pudo conectar a la BD externa');
                 return;
             }
             
-            // 3. CONSULTAS INICIALES - Todas al principio
+            $GLOBALS['log']->info('[SyncJob] Conexión a BD externa exitosa');
+            error_log('[SyncJob] Conexión a BD externa exitosa');
+            
+            // 3. Consultar datos de BD externa
+            $GLOBALS['log']->info('[SyncJob] Consultando datos de BD externa...');
             error_log('[SyncJob] Consultando datos de BD externa...');
             
-            // Consulta de usuarios
-            $sqlUsuarios = "SELECT id, idAfiliados, nombre, apellidoP, username, password, email, telMovil, puesto 
+            // Consulta actualizada de usuarios ACTIVOS con apellidoM y fotoPath
+            $GLOBALS['log']->info('[SyncJob] Consultando usuarios ACTIVOS...');
+            $sqlUsuarios = "SELECT id, idAfiliados, nombre, apellidoM, apellidoP, username, password, email, telMovil, puesto, fotoPath 
                            FROM usuarios 
                            WHERE isActive = 1 AND idAfiliados IS NOT NULL";
             $stmtUsuarios = $pdo->prepare($sqlUsuarios);
             $stmtUsuarios->execute();
             $usuariosExternos = $stmtUsuarios->fetchAll(PDO::FETCH_ASSOC);
+            $GLOBALS['log']->info('[SyncJob] Usuarios ACTIVOS obtenidos: ' . count($usuariosExternos));
+            
+            // Consulta de usuarios INACTIVOS (para desactivarlos en EspoCRM)
+            $GLOBALS['log']->info('[SyncJob] Consultando usuarios INACTIVOS...');
+            $sqlUsuariosInactivos = "SELECT id, idAfiliados, nombre, apellidoM, apellidoP, username, password, email, telMovil, puesto, fotoPath 
+                           FROM usuarios 
+                           WHERE isActive = 0 AND idAfiliados IS NOT NULL";
+            $stmtUsuariosInactivos = $pdo->prepare($sqlUsuariosInactivos);
+            $stmtUsuariosInactivos->execute();
+            $usuariosInactivos = $stmtUsuariosInactivos->fetchAll(PDO::FETCH_ASSOC);
+            $GLOBALS['log']->info('[SyncJob] Usuarios INACTIVOS obtenidos: ' . count($usuariosInactivos));
             
             // Consulta de afiliados
+            $GLOBALS['log']->info('[SyncJob] Consultando afiliados...');
             $sqlAfiliados = "SELECT licencia, nombre, zona 
                             FROM afiliados 
                             WHERE isActive = 1
-                            and (suspendida = 0 or suspendida IS NULL)";
+                            AND (suspendida = 0 OR suspendida IS NULL)";
             $stmtAfiliados = $pdo->prepare($sqlAfiliados);
             $stmtAfiliados->execute();
             $afiliadosExternos = $stmtAfiliados->fetchAll(PDO::FETCH_ASSOC);
+            $GLOBALS['log']->info('[SyncJob] Afiliados obtenidos: ' . count($afiliadosExternos));
             
             // Consulta de roles distintos
+            $GLOBALS['log']->info('[SyncJob] Consultando roles...');
             $sqlRoles = "SELECT DISTINCT puesto 
                         FROM usuarios 
                         WHERE puesto IS NOT NULL 
@@ -94,13 +113,27 @@ class SincronizarDatosExternos implements JobDataLess
             $stmtRoles = $pdo->prepare($sqlRoles);
             $stmtRoles->execute();
             $rolesExternos = $stmtRoles->fetchAll(PDO::FETCH_COLUMN);
+            $GLOBALS['log']->info('[SyncJob] Roles obtenidos: ' . count($rolesExternos));
             
             $pdo = null; // Cerrar conexión
             
-            error_log('[SyncJob] Datos obtenidos: ' . count($usuariosExternos) . ' usuarios, ' . 
-                     count($afiliadosExternos) . ' afiliados, ' . count($rolesExternos) . ' roles');
+            $mensaje = '[SyncJob] Datos obtenidos: ' . count($usuariosExternos) . ' usuarios activos, ' . 
+                     count($usuariosInactivos) . ' usuarios inactivos, ' .
+                     count($afiliadosExternos) . ' afiliados, ' . count($rolesExternos) . ' roles';
+            $GLOBALS['log']->info($mensaje);
+            error_log($mensaje);
             
-            // 4. Ejecutar sincronización en orden
+            // 4. Inicializar handlers
+            $GLOBALS['log']->info('[SyncJob] Inicializando handlers...');
+            
+            $passwordHash = $this->injectableFactory->create(PasswordHash::class);
+            $imageHandler = new ImageHandler($this->entityManager);
+            $teamHandler = new TeamHandler($this->entityManager);
+            $userHandler = new UserHandler($this->entityManager, $imageHandler, $teamHandler, $passwordHash);
+            
+            $GLOBALS['log']->info('[SyncJob] Handlers inicializados correctamente');
+            
+            // 5. Ejecutar sincronización en ORDEN ESPECÍFICO
             $summary = [
                 'roles' => ['created' => 0, 'existing' => 0, 'errors' => 0],
                 'clas' => ['created' => 0, 'existing' => 0, 'errors' => 0],
@@ -108,15 +141,42 @@ class SincronizarDatosExternos implements JobDataLess
                 'users' => ['created' => 0, 'updated' => 0, 'disabled' => 0, 'errors' => 0, 'skipped' => 0, 'no_changes' => 0]
             ];
             
-            $this->syncRoles($rolesExternos, $config['id'], $summary);
-            $this->syncCLAs($config['id'], $summary);
-            $this->syncAfiliados($afiliadosExternos, $config['id'], $summary);
-            $this->syncUsuarios($usuariosExternos, $afiliadosExternos, $rolesExternos, $config['id'], $summary);
+            error_log('[SyncJob] ========== ORDEN DE SINCRONIZACIÓN ==========');
+            error_log('[SyncJob] 1. Roles - Crear roles que no existan');
+            error_log('[SyncJob] 2. CLAs - Verificar que todos los CLAs existan');
+            error_log('[SyncJob] 3. Oficinas - Crear/Actualizar/Eliminar según BD externa');
+            error_log('[SyncJob] 4. Usuarios - Crear/Actualizar según BD externa');
+            error_log('[SyncJob] ================================================');
             
-            // 5. Limpiar logs antiguos
+            // PASO 1: Sincronizar Roles
+            error_log('[SyncJob] >>> PASO 1: Sincronizando Roles...');
+            $this->syncRoles($rolesExternos, $config['id'], $summary);
+            
+            // PASO 2: Sincronizar CLAs
+            error_log('[SyncJob] >>> PASO 2: Sincronizando CLAs...');
+            $teamHandler->syncCLAs($config['id'], $summary);
+            
+            // PASO 3: Sincronizar Oficinas (crea, actualiza Y ELIMINA)
+            // IMPORTANTE: Al eliminar oficinas, primero desactiva usuarios de esa oficina
+            error_log('[SyncJob] >>> PASO 3: Sincronizando Oficinas...');
+            $teamHandler->syncAfiliados($afiliadosExternos, $config['id'], $summary);
+            
+            // PASO 4: Sincronizar Usuarios (crea y actualiza, NO elimina)
+            // Los usuarios obsoletos se desactivan, no se eliminan
+            error_log('[SyncJob] >>> PASO 4: Sincronizando Usuarios...');
+            $userHandler->syncUsuarios($usuariosExternos, $usuariosInactivos, $afiliadosExternos, $rolesExternos, $config['id'], $summary);
+            
+            // 6. Recopilar incidencias de todos los handlers
+            $this->incidencias = array_merge(
+                $this->incidencias,
+                $teamHandler->getIncidencias(),
+                $userHandler->getIncidencias()
+            );
+            
+            // 7. Limpiar logs antiguos
             $this->cleanOldLogs();
             
-            // 6. Determinar estado final
+            // 8. Determinar estado final
             $status = 'success';
             $hasErrors = $summary['roles']['errors'] > 0 || 
                         $summary['clas']['errors'] > 0 || 
@@ -129,12 +189,12 @@ class SincronizarDatosExternos implements JobDataLess
             
             $this->updateConfigStatus($config['id'], $status);
             
-            // 7. Enviar email con incidencias si las hay
+            // 9. Enviar email con incidencias si las hay
             if (count($this->incidencias) > 0 && !empty($config['notificationEmail'])) {
                 $this->sendIncidenciasEmail($config['notificationEmail'], $summary);
             }
             
-            // 8. Log resumen
+            // 10. Log resumen
             error_log('[SyncJob] ========== SINCRONIZACIÓN COMPLETADA ==========');
             error_log('[SyncJob] Roles - Creados: ' . $summary['roles']['created'] . ' | Existentes: ' . $summary['roles']['existing'] . ' | Errores: ' . $summary['roles']['errors']);
             error_log('[SyncJob] CLAs - Creados: ' . $summary['clas']['created'] . ' | Existentes: ' . $summary['clas']['existing']);
@@ -143,30 +203,40 @@ class SincronizarDatosExternos implements JobDataLess
             error_log('[SyncJob] Total incidencias notificadas: ' . count($this->incidencias));
             
         } catch (\Exception $e) {
-            error_log('[SyncJob] Error crítico: ' . $e->getMessage());
-            error_log('[SyncJob] Trace: ' . $e->getTraceAsString());
+            $mensaje = '[SyncJob] Error crítico: ' . $e->getMessage();
+            $trace = '[SyncJob] Trace: ' . $e->getTraceAsString();
+            
+            error_log($mensaje);
+            error_log($trace);
+            
+            if (isset($GLOBALS['log'])) {
+                $GLOBALS['log']->error($mensaje);
+                $GLOBALS['log']->error($trace);
+                $GLOBALS['log']->error('[SyncJob] Archivo: ' . $e->getFile());
+                $GLOBALS['log']->error('[SyncJob] Línea: ' . $e->getLine());
+            }
+            
+            // NO re-lanzar para evitar Error 500
+            // El error ya está registrado en logs
         }
     }
     
     /**
-     * PASO 1: Sincronizar Roles
+     * Sincronizar Roles
      */
     private function syncRoles(array $rolesExternos, string $configId, array &$summary): void
     {
-        error_log('[SyncJob] === PASO 1: Sincronizando Roles ===');
+        error_log('[SyncJob] === Sincronizando Roles ===');
         
         foreach ($rolesExternos as $puestoOriginal) {
             try {
-                // Mantener el nombre original del rol
                 $nombreRol = $puestoOriginal;
                 
-                // Verificar si el rol existe
                 $rol = $this->entityManager->getRDBRepository('Role')
                     ->where(['name' => $nombreRol])
                     ->findOne();
                 
                 if (!$rol) {
-                    // Crear rol nuevo
                     $rol = $this->entityManager->getNewEntity('Role');
                     $rol->set('name', $nombreRol);
                     $this->entityManager->saveEntity($rol);
@@ -177,8 +247,6 @@ class SincronizarDatosExternos implements JobDataLess
                     error_log("[SyncJob] Rol creado: {$nombreRol}");
                 } else {
                     $summary['roles']['existing']++;
-                    // SOLO CONTAR, NO LOG INDIVIDUAL
-                    // error_log("[SyncJob] Rol existente: {$nombreRol}");
                 }
                 
             } catch (\Exception $e) {
@@ -192,613 +260,7 @@ class SincronizarDatosExternos implements JobDataLess
     }
     
     /**
-     * PASO 2: Sincronizar CLAs
-     */
-    private function syncCLAs(string $configId, array &$summary): void
-    {
-        error_log('[SyncJob] === PASO 2: Sincronizando CLAs ===');
-        
-        foreach (self::CLAS as $numero => $nombre) {
-            try {
-                $claId = 'CLA' . $numero;
-                
-                $cla = $this->entityManager->getEntityById('Team', $claId);
-                
-                if (!$cla) {
-                    // Crear CLA
-                    $cla = $this->entityManager->getNewEntity('Team');
-                    $cla->set('id', $claId);
-                    $cla->set('name', $nombre);
-                    $this->entityManager->saveEntity($cla);
-                    
-                    $summary['clas']['created']++;
-                    $this->addLog('created', 'Team', $claId, $nombre, 'success', 
-                                 "CLA '{$nombre}' creado", $configId);
-                    error_log("[SyncJob] CLA creado: {$claId} - {$nombre}");
-                } else {
-                    // Actualizar nombre si cambió
-                    if ($cla->get('name') !== $nombre) {
-                        $cla->set('name', $nombre);
-                        $this->entityManager->saveEntity($cla);
-                        
-                        // LOG DE CLA ACTUALIZADO
-                        $this->addLog('updated', 'Team', $claId, $nombre, 'success', 
-                                     "CLA '{$nombre}' actualizado", $configId);
-                        error_log("[SyncJob] CLA actualizado: {$claId} - {$nombre}");
-                    } else {
-                        // SOLO CONTAR, NO LOG INDIVIDUAL
-                        $summary['clas']['existing']++;
-                    }
-                }
-                
-            } catch (\Exception $e) {
-                $summary['clas']['errors']++;
-                $mensaje = "Error creando CLA{$numero}: " . $e->getMessage();
-                $this->addIncidencia('validation_error', 'Team', 'CLA' . $numero, $nombre, $mensaje);
-                $this->addLog('error', 'Team', 'CLA' . $numero, $nombre, 'error', $mensaje, $configId);
-                error_log("[SyncJob] {$mensaje}");
-            }
-        }
-    }
-    
-    /**
-     * PASO 3: Sincronizar Afiliados (Equipos/Oficinas)
-     */
-    private function syncAfiliados(array $afiliadosExternos, string $configId, array &$summary): void
-    {
-        error_log('[SyncJob] === PASO 3: Sincronizando Afiliados (Teams) ===');
-        
-        $idsExternos = [];
-        
-        foreach ($afiliadosExternos as $afiliado) {
-            try {
-                // VALIDACIÓN: campos obligatorios
-                if (empty($afiliado['licencia'])) {
-                    $summary['teams']['errors']++;
-                    $mensaje = "Afiliado con licencia NULL o vacía";
-                    $this->addIncidencia('validation_error', 'Team', null, $afiliado['nombre'] ?? 'Desconocido', $mensaje);
-                    $this->addLog('error', 'Team', null, $afiliado['nombre'] ?? 'Desconocido', 'error', $mensaje, $configId);
-                    continue;
-                }
-                
-                if (!isset($afiliado['zona']) || $afiliado['zona'] === null || $afiliado['zona'] === '') {
-                    $summary['teams']['errors']++;
-                    $mensaje = "Afiliado '{$afiliado['licencia']}': campo zona es NULL o vacío";
-                    $this->addIncidencia('validation_error', 'Team', $afiliado['licencia'], $afiliado['nombre'], $mensaje);
-                    $this->addLog('error', 'Team', $afiliado['licencia'], $afiliado['nombre'], 'error', $mensaje, $configId);
-                    continue;
-                }
-                
-                if (empty($afiliado['nombre'])) {
-                    $summary['teams']['errors']++;
-                    $mensaje = "Afiliado '{$afiliado['licencia']}': campo nombre es NULL o vacío";
-                    $this->addIncidencia('validation_error', 'Team', $afiliado['licencia'], 'Sin nombre', $mensaje);
-                    $this->addLog('error', 'Team', $afiliado['licencia'], 'Sin nombre', 'error', $mensaje, $configId);
-                    continue;
-                }
-                
-                // VALIDACIÓN: zona válida (0-9)
-                $zona = (int)$afiliado['zona'];
-                if ($zona < 0 || $zona > 9) {
-                    $summary['teams']['errors']++;
-                    $mensaje = "Afiliado '{$afiliado['licencia']}': zona '{$afiliado['zona']}' fuera de rango (debe ser 0-9)";
-                    $this->addIncidencia('validation_error', 'Team', $afiliado['licencia'], $afiliado['nombre'], $mensaje);
-                    $this->addLog('error', 'Team', $afiliado['licencia'], $afiliado['nombre'], 'error', $mensaje, $configId);
-                    continue;
-                }
-                
-                $teamId = $afiliado['licencia'];
-                $idsExternos[] = $teamId;
-                
-                $team = $this->entityManager->getEntityById('Team', $teamId);
-                
-                if (!$team) {
-                    // Crear team
-                    $team = $this->entityManager->getNewEntity('Team');
-                    $team->set('id', $teamId);
-                    $team->set('name', $afiliado['nombre']);
-                    $this->entityManager->saveEntity($team);
-                    
-                    $summary['teams']['created']++;
-                    $this->addLog('created', 'Team', $teamId, $afiliado['nombre'], 'success', 
-                                 'Team creado', $configId);
-                    error_log("[SyncJob] Team creado: {$teamId} - {$afiliado['nombre']}");
-                } else {
-                    // Actualizar si cambió el nombre
-                    if ($team->get('name') !== $afiliado['nombre']) {
-                        $team->set('name', $afiliado['nombre']);
-                        $this->entityManager->saveEntity($team);
-                        
-                        $summary['teams']['updated']++;
-                        $this->addLog('updated', 'Team', $teamId, $afiliado['nombre'], 'success', 
-                                     'Team actualizado', $configId);
-                        error_log("[SyncJob] Team actualizado: {$teamId} - {$afiliado['nombre']}");
-                    }
-                    // SOLO CONTAR, NO LOG INDIVIDUAL PARA SIN CAMBIOS
-                }
-                
-            } catch (\Exception $e) {
-                $summary['teams']['errors']++;
-                $mensaje = "Error procesando afiliado: " . $e->getMessage();
-                $this->addIncidencia('sync_error', 'Team', $afiliado['licencia'] ?? null, $afiliado['nombre'] ?? 'Desconocido', $mensaje);
-                $this->addLog('error', 'Team', $afiliado['licencia'] ?? null, $afiliado['nombre'] ?? 'Desconocido', 'error', $mensaje, $configId);
-                error_log("[SyncJob] {$mensaje}");
-            }
-        }
-        
-        // Eliminar teams que ya no existen (excepto CLAs)
-        $this->deleteRemovedTeams($idsExternos, $configId, $summary);
-    }
-    
-    /**
-     * Eliminar teams que ya no existen en BD externa (excepto CLAs)
-     */
-    private function deleteRemovedTeams(array $idsExternos, string $configId, array &$summary): void
-    {
-        try {
-            $allTeams = $this->entityManager->getRDBRepository('Team')->find();
-            
-            foreach ($allTeams as $team) {
-                $teamId = $team->getId();
-                
-                // No eliminar CLAs
-                if (strpos($teamId, 'CLA') === 0) {
-                    continue;
-                }
-                
-                // Si el team no está en la lista externa, eliminarlo
-                if (!in_array($teamId, $idsExternos)) {
-                    $teamName = $team->get('name');
-                    $this->entityManager->removeEntity($team);
-                    
-                    $summary['teams']['deleted']++;
-                    $this->addLog('deleted', 'Team', $teamId, $teamName, 'warning', 
-                                 'Team eliminado (ya no existe en BD externa)', $configId);
-                    error_log("[SyncJob] Team eliminado: {$teamId} - {$teamName}");
-                }
-            }
-        } catch (\Exception $e) {
-            error_log('[SyncJob] Error eliminando teams: ' . $e->getMessage());
-        }
-    }
-    
-    /**
-     * PASO 4: Sincronizar Usuarios - VERSIÓN OPTIMIZADA
-     */
-    private function syncUsuarios(array $usuariosExternos, array $afiliadosExternos, array $rolesExternos, string $configId, array &$summary): void
-    {
-        error_log('[SyncJob] === PASO 4: Sincronizando Usuarios (VERSIÓN OPTIMIZADA) ===');
-        error_log('[SyncJob] Total usuarios a procesar: ' . count($usuariosExternos));
-        
-        // Crear mapa de afiliados para búsqueda rápida
-        $mapaAfiliados = [];
-        foreach ($afiliadosExternos as $afiliado) {
-            if (!empty($afiliado['licencia'])) {
-                $mapaAfiliados[$afiliado['licencia']] = $afiliado;
-            }
-        }
-        
-        // Usar los nombres originales de roles
-        $idsExternos = [];
-        
-        // Procesar en lotes más pequeños para evitar timeout
-        $loteSize = 50; // Reducido de 100 a 50
-        $totalUsuarios = count($usuariosExternos);
-        $lotes = array_chunk($usuariosExternos, $loteSize);
-        $loteActual = 1;
-        $totalLotes = count($lotes);
-        
-        error_log("[SyncJob] Procesando en {$totalLotes} lotes de máximo {$loteSize} usuarios");
-        
-        foreach ($lotes as $lote) {
-            error_log("[SyncJob] Procesando lote {$loteActual}/{$totalLotes} (" . count($lote) . " usuarios)");
-            
-            foreach ($lote as $usuario) {
-                try {
-                    // VALIDACIÓN: campos obligatorios
-                    if (empty($usuario['id'])) {
-                        $summary['users']['errors']++;
-                        $mensaje = "Usuario con ID NULL o vacío";
-                        $this->addIncidencia('validation_error', 'User', null, $usuario['username'] ?? 'Desconocido', $mensaje);
-                        $this->addLog('error', 'User', null, $usuario['username'] ?? 'Desconocido', 'error', $mensaje, $configId);
-                        continue;
-                    }
-                    
-                    if (empty($usuario['idAfiliados'])) {
-                        $summary['users']['errors']++;
-                        $mensaje = "Usuario '{$usuario['id']}': campo idAfiliados es NULL o vacío";
-                        $this->addIncidencia('validation_error', 'User', $usuario['id'], $usuario['username'], $mensaje);
-                        $this->addLog('error', 'User', $usuario['id'], $usuario['username'], 'error', $mensaje, $configId);
-                        continue;
-                    }
-                    
-                    if (empty($usuario['puesto'])) {
-                        $summary['users']['errors']++;
-                        $mensaje = "Usuario '{$usuario['id']}': campo puesto es NULL o vacío";
-                        $this->addIncidencia('validation_error', 'User', $usuario['id'], $usuario['username'], $mensaje);
-                        $this->addLog('error', 'User', $usuario['id'], $usuario['username'], 'error', $mensaje, $configId);
-                        continue;
-                    }
-                    
-                    $userId = $usuario['id'];
-                    $idsExternos[] = $userId;
-                    
-                    // Verificar que el Team (afiliado) existe
-                    $teamId = (string)$usuario['idAfiliados'];
-                    $team = $this->entityManager->getEntityById('Team', $teamId);
-                    
-                    if (!$team) {
-                        $summary['users']['errors']++;
-                        $mensaje = "Usuario '{$userId}' tiene asignado el afiliado '{$teamId}' que no existe en el sistema";
-                        $this->addIncidencia('missing_team', 'User', $userId, $usuario['username'], $mensaje);
-                        $this->addLog('error', 'User', $userId, $usuario['username'], 'error', $mensaje, $configId);
-                        continue;
-                    }
-                    
-                    // Obtener zona del afiliado para asignar CLA
-                    if (!isset($mapaAfiliados[$teamId])) {
-                        $summary['users']['errors']++;
-                        $mensaje = "Usuario '{$userId}': no se encontró información del afiliado '{$teamId}' en los datos consultados";
-                        $this->addIncidencia('missing_team', 'User', $userId, $usuario['username'], $mensaje);
-                        $this->addLog('error', 'User', $userId, $usuario['username'], 'error', $mensaje, $configId);
-                        continue;
-                    }
-                    
-                    $zona = (int)$mapaAfiliados[$teamId]['zona'];
-                    $claId = 'CLA' . $zona;
-                    
-                    // Verificar que el CLA existe
-                    $cla = $this->entityManager->getEntityById('Team', $claId);
-                    if (!$cla) {
-                        $summary['users']['errors']++;
-                        $mensaje = "Usuario '{$userId}': CLA '{$claId}' no existe (zona: {$zona})";
-                        $this->addIncidencia('missing_team', 'User', $userId, $usuario['username'], $mensaje);
-                        $this->addLog('error', 'User', $userId, $usuario['username'], 'error', $mensaje, $configId);
-                        continue;
-                    }
-                    
-                    // Usar el nombre de rol original sin cambios
-                    $nombreRol = $usuario['puesto'];
-                    $rol = $this->entityManager->getRDBRepository('Role')
-                        ->where(['name' => $nombreRol])
-                        ->findOne();
-                    
-                    if (!$rol) {
-                        $summary['users']['errors']++;
-                        $mensaje = "Usuario '{$userId}' usa el rol '{$usuario['puesto']}' que no existe en el sistema";
-                        $this->addIncidencia('missing_role', 'User', $userId, $usuario['username'], $mensaje);
-                        $this->addLog('error', 'User', $userId, $usuario['username'], 'error', $mensaje, $configId);
-                        continue;
-                    }
-                    
-                    // ========== LÓGICA DE ACTUALIZACIÓN INTELIGENTE ==========
-                    
-                    // Crear o actualizar usuario
-                    $user = $this->entityManager->getEntityById('User', $userId);
-                    $isNew = !$user;
-                    
-                    if (!$user) {
-                        // USUARIO NUEVO - Crear con todos los datos
-                        $user = $this->entityManager->getNewEntity('User');
-                        $user->set('id', $userId);
-                        
-                        $user->set([
-                            'firstName' => $usuario['nombre'],
-                            'lastName' => $usuario['apellidoP'],
-                            'userName' => $usuario['username'],
-                            'emailAddress' => $usuario['email'] ?? '',
-                            'phoneNumber' => $usuario['telMovil'] ?? '',
-                            'type' => 'regular',
-                            'isActive' => true,
-                            'defaultTeamId' => $teamId,
-                            'password' => password_hash($usuario['password'], PASSWORD_DEFAULT)
-                        ]);
-                        
-                        $this->entityManager->saveEntity($user);
-                        $summary['users']['created']++;
-                        
-                        // LOG DE CREACIÓN EXITOSA
-                        $this->addLog('created', 'User', $userId, $usuario['username'], 'success', 
-                                     "Usuario creado exitosamente - Rol: {$nombreRol}, Team: {$teamId}", $configId);
-                        error_log("[SyncJob] Usuario creado: {$userId}");
-                        
-                    } else {
-                        // USUARIO EXISTENTE - Verificar cambios antes de actualizar
-                        $needsUpdate = false;
-                        $changes = [];
-
-                        // Comparar cada campo individualmente con normalización
-                        
-                        // Normalizar valores para comparación correcta
-                        $nombreExterno = trim($usuario['nombre']);
-                        $apellidoExterno = trim($usuario['apellidoP']);
-                        $usernameExterno = trim($usuario['username']);
-                        $emailExterno = trim($usuario['email'] ?? '');
-                        $telefonoExterno = trim($usuario['telMovil'] ?? '');
-                        
-                        $nombreActual = trim($user->get('firstName') ?? '');
-                        $apellidoActual = trim($user->get('lastName') ?? '');
-                        $usernameActual = trim($user->get('userName') ?? '');
-                        $emailActual = trim($user->get('emailAddress') ?? '');
-                        $telefonoActual = trim($user->get('phoneNumber') ?? '');
-
-                        // Comparar nombre
-                        if ($nombreActual !== $nombreExterno) {
-                            $user->set('firstName', $nombreExterno);
-                            $changes[] = "nombre ('{$nombreActual}' -> '{$nombreExterno}')";
-                            $needsUpdate = true;
-                        }
-
-                        // Comparar apellido
-                        if ($apellidoActual !== $apellidoExterno) {
-                            $user->set('lastName', $apellidoExterno);
-                            $changes[] = "apellido ('{$apellidoActual}' -> '{$apellidoExterno}')";
-                            $needsUpdate = true;
-                        }
-
-                        // Comparar username
-                        if ($usernameActual !== $usernameExterno) {
-                            $user->set('userName', $usernameExterno);
-                            $changes[] = "username ('{$usernameActual}' -> '{$usernameExterno}')";
-                            $needsUpdate = true;
-                        }
-
-                        // Comparar email (solo si no está vacío en BD externa)
-                        if (!empty($emailExterno) && $emailActual !== $emailExterno) {
-                            $user->set('emailAddress', $emailExterno);
-                            $changes[] = "email ('{$emailActual}' -> '{$emailExterno}')";
-                            $needsUpdate = true;
-                        }
-
-                        // Comparar teléfono (solo si no está vacío en BD externa)
-                        if (!empty($telefonoExterno) && $telefonoActual !== $telefonoExterno) {
-                            $user->set('phoneNumber', $telefonoExterno);
-                            $changes[] = "teléfono ('{$telefonoActual}' -> '{$telefonoExterno}')";
-                            $needsUpdate = true;
-                        }
-
-                        // Comparar defaultTeamId - Normalizar tipos para comparación
-                        $currentDefaultTeamId = $user->get('defaultTeamId');
-
-                        // Extraer el ID del team actual y convertir a string
-                        $currentTeamIdString = '';
-                        if ($currentDefaultTeamId !== null && $currentDefaultTeamId !== '') {
-                            if (is_object($currentDefaultTeamId)) {
-                                // Si es un objeto Entity, obtener su ID
-                                $currentTeamIdString = (string)$currentDefaultTeamId->getId();
-                            } else {
-                                // Si es string o int, convertir a string
-                                $currentTeamIdString = (string)$currentDefaultTeamId;
-                            }
-                        }
-
-                        // Asegurar que $teamId también sea string
-                        $teamIdString = (string)$teamId;
-
-                        // Comparar los IDs como strings
-                        if ($currentTeamIdString !== $teamIdString) {
-                            $user->set('defaultTeamId', $teamIdString);
-                            $changes[] = "team por defecto ('{$currentTeamIdString}' -> '{$teamIdString}')";
-                            $needsUpdate = true;
-                        }
-
-                        // Verificar si el usuario está activo
-                        if (!$user->get('isActive')) {
-                            $user->set('isActive', true);
-                            $changes[] = "reactivado";
-                            $needsUpdate = true;
-                        }
-
-                        // NO ACTUALIZAR PASSWORD en usuarios existentes
-                        // La contraseña solo se establece al crear el usuario
-                        // Si necesitas forzar actualización de password, hazlo manualmente
-
-                        if ($needsUpdate) {
-                            $this->entityManager->saveEntity($user);
-                            $summary['users']['updated']++;
-                            
-                            // LOG DE ACTUALIZACIÓN EXITOSA con detalles
-                            $this->addLog('updated', 'User', $userId, $usuario['username'], 'success', 
-                                        "Usuario actualizado - Cambios: " . implode(', ', $changes), $configId);
-                            error_log("[SyncJob] Usuario actualizado: {$userId} - " . implode(', ', $changes));
-                        } else {
-                            $summary['users']['no_changes']++;
-                            // SOLO CONTAR, NO LOG INDIVIDUAL PARA SIN CAMBIOS
-                        }
-                    }
-                    
-                    // ========== GESTIÓN DE RELACIONES (Teams y Roles) ==========
-                    
-                    // Asignar ambos teams: afiliado + CLA
-                    $teamRelation = $this->entityManager->getRDBRepository('User')
-                        ->getRelation($user, 'teams');
-                    
-                    // Verificar y actualizar relaciones de teams
-                    $currentTeams = $teamRelation->find();
-                    $currentTeamIds = [];
-                    foreach ($currentTeams as $currentTeam) {
-                        $currentTeamIds[] = $currentTeam->getId();
-                    }
-                    
-                    $requiredTeamIds = [$teamId, $claId];
-                    $needsTeamUpdate = false;
-                    
-                    // Verificar si los teams requeridos ya están asignados
-                    foreach ($requiredTeamIds as $requiredTeamId) {
-                        if (!in_array($requiredTeamId, $currentTeamIds)) {
-                            $needsTeamUpdate = true;
-                            break;
-                        }
-                    }
-                    
-                    // Verificar si hay teams extra que no deberían estar
-                    foreach ($currentTeamIds as $currentTeamId) {
-                        if (!in_array($currentTeamId, $requiredTeamIds)) {
-                            $needsTeamUpdate = true;
-                            break;
-                        }
-                    }
-                    
-                    if ($needsTeamUpdate) {
-                        // Eliminar todas las relaciones existentes
-                        foreach ($currentTeams as $currentTeam) {
-                            $teamRelation->unrelate($currentTeam);
-                        }
-                        
-                        // Agregar las nuevas relaciones
-                        $teamRelation->relate($team);
-                        $teamRelation->relate($cla);
-                        
-                        // LOG DE ACTUALIZACIÓN DE TEAMS
-                        $this->addLog('teams_updated', 'User', $userId, $usuario['username'], 'success', 
-                                     "Teams actualizados - Afiliado: {$teamId}, CLA: {$claId}", $configId);
-                        
-                        if (!$isNew) {
-                            error_log("[SyncJob] Teams actualizados para usuario: {$userId}");
-                        }
-                    }
-                    
-                    // ========== GESTIÓN INTELIGENTE DE ROLES ==========
-                    // Sincronizar solo roles importados, mantener roles no importados
-                    $roleRelation = $this->entityManager->getRDBRepository('User')
-                        ->getRelation($user, 'roles');
-                    
-                    $currentRoles = $roleRelation->find();
-                    $needsRoleUpdate = false;
-                    
-                    // Separar roles en dos grupos: roles importados y roles no importados
-                    $rolesImportados = $rolesExternos; // Los roles que vienen de la BD externa
-                    $rolesActuales = [];
-                    $rolesNoImportados = [];
-                    
-                    foreach ($currentRoles as $currentRole) {
-                        $nombreRolActual = $currentRole->get('name');
-                        $rolesActuales[$currentRole->getId()] = $nombreRolActual;
-                        
-                        // Si el rol actual NO está en la lista de roles importados, es un rol no importado
-                        if (!in_array($nombreRolActual, $rolesImportados)) {
-                            $rolesNoImportados[$currentRole->getId()] = $currentRole;
-                        }
-                    }
-                    
-                    // Verificar si el rol requerido (de la BD externa) ya está asignado
-                    $rolRequeridoAsignado = false;
-                    foreach ($currentRoles as $currentRole) {
-                        if ($currentRole->getId() === $rol->getId()) {
-                            $rolRequeridoAsignado = true;
-                            break;
-                        }
-                    }
-                    
-                    // Si el rol requerido no está asignado O hay otros roles importados que ya no aplican
-                    $rolesImportadosActuales = array_intersect($rolesActuales, $rolesImportados);
-                    if (!$rolRequeridoAsignado || count($rolesImportadosActuales) > 1 || (count($rolesImportadosActuales) === 1 && !$rolRequeridoAsignado)) {
-                        $needsRoleUpdate = true;
-                        
-                        // Eliminar solo los roles importados (excepto el rol no importado que queremos mantener)
-                        foreach ($currentRoles as $currentRole) {
-                            $nombreRolActual = $currentRole->get('name');
-                            // Solo eliminar si es un rol importado y NO es el rol que queremos asignar
-                            if (in_array($nombreRolActual, $rolesImportados) && $currentRole->getId() !== $rol->getId()) {
-                                $roleRelation->unrelate($currentRole);
-                                error_log("[SyncJob] Rol eliminado para usuario {$userId}: {$nombreRolActual}");
-                            }
-                        }
-                        
-                        // Agregar el rol requerido si no está asignado
-                        if (!$rolRequeridoAsignado) {
-                            $roleRelation->relate($rol);
-                            error_log("[SyncJob] Rol agregado para usuario {$userId}: {$nombreRol}");
-                        }
-                    }
-                    
-                    // Log de roles no importados mantenidos
-                    if (count($rolesNoImportados) > 0 && $needsRoleUpdate) {
-                        $nombresRolesNoImportados = implode(', ', array_values(array_map(function($r) { return $r->get('name'); }, $rolesNoImportados)));
-                        
-                        // LOG DE ACTUALIZACIÓN DE ROLES CON MANTENIMIENTO
-                        $this->addLog('roles_updated', 'User', $userId, $usuario['username'], 'success', 
-                                     "Roles sincronizados - Nuevo rol: {$nombreRol}, Roles mantenidos: {$nombresRolesNoImportados}", $configId);
-                        error_log("[SyncJob] Usuario {$userId} mantuvo roles no importados: {$nombresRolesNoImportados}");
-                    } elseif ($needsRoleUpdate) {
-                        // LOG DE ACTUALIZACIÓN DE ROLES SIN MANTENIMIENTO
-                        $this->addLog('roles_updated', 'User', $userId, $usuario['username'], 'success', 
-                                     "Roles sincronizados - Nuevo rol: {$nombreRol}", $configId);
-                    }
-                    
-                    // Log de progreso cada 25 usuarios
-                    $procesados = $summary['users']['created'] + $summary['users']['updated'] + $summary['users']['no_changes'];
-                    if ($procesados % 25 == 0) {
-                        error_log("[SyncJob] Progreso: {$procesados}/{$totalUsuarios} usuarios procesados");
-                    }
-                    
-                } catch (\Exception $e) {
-                    $summary['users']['errors']++;
-                    $mensaje = "Error procesando usuario: " . $e->getMessage();
-                    $this->addIncidencia('sync_error', 'User', $usuario['id'] ?? null, $usuario['username'] ?? 'Desconocido', $mensaje);
-                    $this->addLog('error', 'User', $usuario['id'] ?? null, $usuario['username'] ?? 'Desconocido', 'error', $mensaje, $configId);
-                    error_log("[SyncJob] {$mensaje}");
-                }
-            }
-            
-            // Forzar liberación de memoria después de cada lote
-            gc_collect_cycles();
-            
-            $loteActual++;
-        }
-        
-        error_log("[SyncJob] Usuarios procesados: Creados={$summary['users']['created']}, Actualizados={$summary['users']['updated']}, Sin cambios={$summary['users']['no_changes']}, Errores={$summary['users']['errors']}");
-        
-        // Desactivar usuarios que ya no existen (solo de roles gestionados)
-        $this->disableRemovedUsers($idsExternos, $rolesExternos, $configId, $summary);
-    }
-    
-    /**
-     * Desactivar usuarios que ya no existen en BD externa
-     * Solo afecta usuarios con roles que están siendo gestionados
-     */
-    private function disableRemovedUsers(array $idsExternos, array $rolesGestionados, string $configId, array &$summary): void
-    {
-        try {
-            $allUsers = $this->entityManager->getRDBRepository('User')
-                ->where(['type' => 'regular', 'isActive' => true])
-                ->find();
-            
-            foreach ($allUsers as $user) {
-                $userId = $user->getId();
-                
-                // Obtener roles del usuario
-                $userRoles = $this->entityManager->getRDBRepository('User')
-                    ->getRelation($user, 'roles')
-                    ->find();
-                
-                // Verificar si el usuario tiene algún rol gestionado
-                $tieneRolGestionado = false;
-                foreach ($userRoles as $role) {
-                    if (in_array($role->get('name'), $rolesGestionados)) {
-                        $tieneRolGestionado = true;
-                        break;
-                    }
-                }
-                
-                // Solo desactivar si tiene rol gestionado y no está en la lista externa
-                if ($tieneRolGestionado && !in_array($userId, $idsExternos)) {
-                    $user->set('isActive', false);
-                    $this->entityManager->saveEntity($user);
-                    
-                    $summary['users']['disabled']++;
-                    $this->addLog('disabled', 'User', $userId, $user->get('userName'), 'warning', 
-                                 'Usuario desactivado (ya no existe en BD externa)', $configId);
-                    error_log("[SyncJob] Usuario desactivado: {$userId} - " . $user->get('userName'));
-                }
-            }
-        } catch (\Exception $e) {
-            error_log('[SyncJob] Error desactivando usuarios: ' . $e->getMessage());
-        }
-    }
-    
-    /**
-     * Agregar incidencia para notificar por email
+     * Agregar incidencia
      */
     private function addIncidencia(string $tipo, string $entityType, ?string $entityId, string $entityName, string $mensaje): void
     {
@@ -807,44 +269,40 @@ class SincronizarDatosExternos implements JobDataLess
             'entityType' => $entityType,
             'entityId' => $entityId,
             'entityName' => $entityName,
-            'mensaje' => $mensaje,
-            'timestamp' => date('Y-m-d H:i:s')
+            'mensaje' => $mensaje
         ];
     }
     
     /**
-     * Enviar email con todas las incidencias
+     * Enviar email con incidencias
      */
-    private function sendIncidenciasEmail(string $email, array $summary): void
+    private function sendIncidenciasEmail(string $emailDestino, array $summary): void
     {
         try {
-            error_log("[SyncJob] Preparando envío de email de incidencias a: {$email}");
-            error_log("[SyncJob] Total incidencias a reportar: " . count($this->incidencias));
+            error_log("[SyncJob] === INCIDENCIAS DETECTADAS ===");
+            error_log("[SyncJob] Total de incidencias: " . count($this->incidencias));
             
-            // TEMPORAL: Solo loguear las incidencias en lugar de enviar email
-            // Esto nos permite continuar con la sincronización mientras resolvemos el problema del email
-            
-            if (count($this->incidencias) > 0) {
-                error_log("[SyncJob] === INCIDENCIAS DETECTADAS ===");
-                foreach ($this->incidencias as $index => $incidencia) {
-                    error_log("[SyncJob] Incidencia {$index}: {$incidencia['entityType']} - {$incidencia['entityName']} - {$incidencia['mensaje']}");
+            if (!empty($this->incidencias)) {
+                $grouped = [];
+                foreach ($this->incidencias as $inc) {
+                    $tipo = $inc['tipo'];
+                    if (!isset($grouped[$tipo])) {
+                        $grouped[$tipo] = [];
+                    }
+                    $grouped[$tipo][] = $inc;
+                }
+                
+                foreach ($grouped as $tipo => $items) {
+                    error_log("[SyncJob] {$this->getTipoLabel($tipo)}: " . count($items) . " casos");
+                    foreach ($items as $item) {
+                        error_log("[SyncJob]   - {$item['entityName']}: {$item['mensaje']}");
+                    }
                 }
                 error_log("[SyncJob] === FIN DE INCIDENCIAS ===");
             }
             
-            error_log("[SyncJob] (Email desactivado temporalmente) Resumen: " . 
-                    "Roles: {$summary['roles']['created']} creados, " .
-                    "Teams: {$summary['teams']['created']} creados, " .
-                    "Usuarios: {$summary['users']['created']} creados, {$summary['users']['updated']} actualizados");
-            
-            // Para implementar el envío de email más adelante, necesitaremos:
-            // 1. Crear una plantilla de email en EspoCRM
-            // 2. Usar el servicio de notificaciones
-            // 3. O configurar correctamente el EmailSender
-            
         } catch (\Exception $e) {
             error_log('[SyncJob] Error en sistema de notificación: ' . $e->getMessage());
-            // No detenemos la sincronización por un error de notificación
         }
     }
     
@@ -867,7 +325,8 @@ class SincronizarDatosExternos implements JobDataLess
     /**
      * Agregar log de sincronización
      */
-    private function addLog(string $action, string $entityType, ?string $entityId, string $entityName, string $status, string $message, ?string $configId = null): void
+    private function addLog(string $action, string $entityType, ?string $entityId, string $entityName, 
+                           string $status, string $message, ?string $configId = null): void
     {
         try {
             $log = $this->entityManager->getNewEntity('SyncLog');
