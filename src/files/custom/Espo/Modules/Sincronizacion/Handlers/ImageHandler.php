@@ -6,11 +6,20 @@ use Espo\ORM\EntityManager;
 
 /**
  * Manejador de imágenes de usuarios
+ * 
+ * NOTA: El campo personalizado se llama "cImagen" en EspoCRM,
+ * por lo que el atributo de ID del attachment es "cImagenId".
  */
 class ImageHandler
 {
     private EntityManager $entityManager;
-    private const DEFAULT_USERNAME = '0';
+    
+    // El userName del usuario que tiene la imagen por defecto
+    private const DEFAULT_USER_USERNAME = '0';
+    
+    // Nombre del campo personalizado en EspoCRM (en camelCase para get/set)
+    // Campo: c_imagen_id en BD → cImagenId en EspoCRM ORM
+    private const IMAGE_FIELD = 'cImagenId';
     
     public function __construct(EntityManager $entityManager)
     {
@@ -18,34 +27,49 @@ class ImageHandler
     }
     
     /**
-     * Obtiene el ID de la imagen por defecto del usuario "0"
+     * Obtiene el ID de la imagen por defecto del usuario con userName="0"
      * 
-     * @return string|null ID de la imagen del usuario por defecto
+     * @return string|null ID del attachment de imagen por defecto
      */
     public function getDefaultImageId(): ?string
     {
         try {
-            error_log('[ImageHandler] Buscando usuario por defecto con userName="0"...');
+            error_log('[ImageHandler] Buscando usuario por defecto con userName="' . self::DEFAULT_USER_USERNAME . '"...');
             
             $defaultUser = $this->entityManager->getRDBRepository('User')
-                ->where(['userName' => self::DEFAULT_USERNAME])
+                ->where(['userName' => self::DEFAULT_USER_USERNAME])
                 ->findOne();
             
             if (!$defaultUser) {
-                error_log('[ImageHandler] ERROR: Usuario por defecto "0" no encontrado');
+                error_log('[ImageHandler] ERROR: Usuario por defecto "' . self::DEFAULT_USER_USERNAME . '" no encontrado');
                 return null;
             }
             
-            error_log('[ImageHandler] Usuario "0" encontrado (ID: ' . $defaultUser->getId() . ')');
+            error_log('[ImageHandler] Usuario "' . self::DEFAULT_USER_USERNAME . '" encontrado (ID: ' . $defaultUser->getId() . ')');
             
-            $imageId = $defaultUser->get('cImageId');
+            // Usar el nombre de campo correcto: cImagenId
+            $imageId = $defaultUser->get(self::IMAGE_FIELD);
+            
+            error_log('[ImageHandler] Valor de ' . self::IMAGE_FIELD . ': ' . ($imageId ?? 'NULL/VACÍO'));
             
             if (empty($imageId)) {
-                error_log('[ImageHandler] ERROR: Usuario "0" no tiene imagen asignada (cImageId está vacío)');
+                error_log('[ImageHandler] ERROR: Usuario "0" no tiene imagen asignada en campo ' . self::IMAGE_FIELD);
+                
+                // Intentar también con variantes del nombre por si acaso
+                $alternativeFields = ['cImageId', 'cimageId', 'cImagen', 'avatarId'];
+                foreach ($alternativeFields as $altField) {
+                    $altValue = $defaultUser->get($altField);
+                    error_log("[ImageHandler] Intentando campo alternativo '{$altField}': " . ($altValue ?? 'NULL'));
+                    if (!empty($altValue)) {
+                        error_log("[ImageHandler] ¡Imagen encontrada en campo alternativo '{$altField}'!");
+                        return $altValue;
+                    }
+                }
+                
                 return null;
             }
             
-            error_log('[ImageHandler] Imagen por defecto obtenida: ' . $imageId);
+            error_log('[ImageHandler] ✓ Imagen por defecto obtenida (ID: ' . $imageId . ')');
             return $imageId;
             
         } catch (\Exception $e) {
@@ -55,43 +79,38 @@ class ImageHandler
     }
     
     /**
-     * Descarga una imagen desde una URL externa y la guarda en EspoCRM
+     * Descarga una imagen desde la URL externa y la guarda en EspoCRM
      * 
-     * @param string $fotoPath Ruta de la foto en el servidor externo
+     * @param string $fotoPath Ruta relativa en el servidor externo
      * @return string|null ID del attachment creado o null si falla
      */
     public function downloadAndSaveImage(string $fotoPath): ?string
     {
         try {
-            $url = "https://venezuela.21online.lat/" . $fotoPath;
+            $url = "https://venezuela.21online.lat/" . ltrim($fotoPath, '/');
             error_log("[ImageHandler] Descargando imagen desde: {$url}");
             
-            // Descargar la imagen
             $imageContent = @file_get_contents($url);
             
-            if ($imageContent === false) {
+            if ($imageContent === false || strlen($imageContent) === 0) {
                 error_log("[ImageHandler] ERROR: No se pudo descargar imagen desde: {$url}");
                 return null;
             }
             
             error_log("[ImageHandler] Imagen descargada exitosamente (" . strlen($imageContent) . " bytes)");
             
-            // Obtener información del archivo
             $fileInfo = pathinfo($fotoPath);
             $extension = strtolower($fileInfo['extension'] ?? 'jpg');
             $fileName = $fileInfo['basename'] ?? 'avatar.' . $extension;
             
-            error_log("[ImageHandler] Nombre archivo: {$fileName}, Extensión: {$extension}");
-            
-            // Validar que sea una imagen
             $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
             if (!in_array($extension, $allowedExtensions)) {
                 error_log("[ImageHandler] ERROR: Extensión no permitida: {$extension}");
                 return null;
             }
             
-            // Crear el attachment
-            error_log("[ImageHandler] Creando attachment en EspoCRM...");
+            // Crear el attachment en EspoCRM
+            // El campo relacionado es "cImagen" (nombre del campo en EspoCRM)
             $attachment = $this->entityManager->getNewEntity('Attachment');
             $attachment->set([
                 'name' => $fileName,
@@ -99,7 +118,7 @@ class ImageHandler
                 'role' => 'Attachment',
                 'size' => strlen($imageContent),
                 'relatedType' => 'User',
-                'field' => 'cImage'
+                'field' => 'cImagen'  // Nombre del campo sin "Id" al final
             ]);
             
             $this->entityManager->saveEntity($attachment);
@@ -107,25 +126,18 @@ class ImageHandler
             
             // Guardar el contenido del archivo
             $filePath = "data/upload/" . $attachment->getId();
-            $uploadDir = dirname($filePath);
-            
-            if (!is_dir($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
-                error_log("[ImageHandler] Directorio creado: {$uploadDir}");
-            }
             
             if (file_put_contents($filePath, $imageContent) === false) {
-                error_log("[ImageHandler] ERROR: Error guardando archivo en: {$filePath}");
+                error_log("[ImageHandler] ERROR: No se pudo guardar archivo en: {$filePath}");
                 $this->entityManager->removeEntity($attachment);
                 return null;
             }
             
-            error_log("[ImageHandler] ✓ Archivo guardado exitosamente en: {$filePath}");
+            error_log("[ImageHandler] ✓ Imagen guardada en: {$filePath}");
             return $attachment->getId();
             
         } catch (\Exception $e) {
             error_log('[ImageHandler] ERROR descargando imagen: ' . $e->getMessage());
-            error_log('[ImageHandler] Stack trace: ' . $e->getTraceAsString());
             return null;
         }
     }
@@ -133,41 +145,48 @@ class ImageHandler
     /**
      * Obtiene o descarga la imagen para un usuario
      * 
-     * @param string|null $fotoPath Ruta de la foto en BD externa (puede ser null)
-     * @param string|null $currentImageId ID de imagen actual del usuario
+     * @param string|null $fotoPath Ruta de foto en BD externa (puede ser null)
+     * @param string|null $currentImageId ID de imagen actual del usuario (campo cImagenId)
      * @return array ['imageId' => string|null, 'updated' => bool]
      */
     public function processUserImage(?string $fotoPath, ?string $currentImageId): array
     {
         error_log('[ImageHandler] --- Procesando imagen de usuario ---');
         error_log('[ImageHandler] fotoPath: ' . ($fotoPath ?? 'NULL'));
-        error_log('[ImageHandler] currentImageId: ' . ($currentImageId ?? 'NULL'));
+        error_log('[ImageHandler] currentImageId (campo ' . self::IMAGE_FIELD . '): ' . ($currentImageId ?? 'NULL'));
         
         $result = [
             'imageId' => $currentImageId,
             'updated' => false
         ];
         
-        // Si hay fotoPath, intentar descargar la imagen
+        // Si hay fotoPath, intentar descargar la imagen externa
         if (!empty($fotoPath)) {
-            error_log('[ImageHandler] fotoPath NO es null, descargando imagen...');
+            error_log('[ImageHandler] Hay fotoPath, intentando descargar imagen externa...');
             $newImageId = $this->downloadAndSaveImage($fotoPath);
             
             if ($newImageId !== null && $newImageId !== $currentImageId) {
-                error_log('[ImageHandler] ✓ Imagen descargada exitosamente (ID: ' . $newImageId . ')');
+                error_log('[ImageHandler] ✓ Imagen descargada (ID: ' . $newImageId . ')');
                 $result['imageId'] = $newImageId;
                 $result['updated'] = true;
-            } else if ($newImageId === $currentImageId) {
-                error_log('[ImageHandler] Imagen descargada es la misma que la actual');
-            } else {
-                error_log('[ImageHandler] No se pudo descargar la imagen');
+            } else if ($newImageId === null) {
+                error_log('[ImageHandler] No se pudo descargar imagen, usando imagen actual o por defecto');
+                // Si no se pudo descargar y no tiene imagen, usar por defecto
+                if (empty($currentImageId)) {
+                    $defaultId = $this->getDefaultImageId();
+                    if ($defaultId) {
+                        $result['imageId'] = $defaultId;
+                        $result['updated'] = true;
+                        error_log('[ImageHandler] Usando imagen por defecto como fallback');
+                    }
+                }
             }
             
             return $result;
         }
         
         // Si no hay fotoPath, usar imagen por defecto del usuario "0"
-        error_log('[ImageHandler] fotoPath es null, usando imagen por defecto...');
+        error_log('[ImageHandler] No hay fotoPath, usando imagen por defecto...');
         $defaultImageId = $this->getDefaultImageId();
         
         if ($defaultImageId === null) {
@@ -177,26 +196,34 @@ class ImageHandler
         
         // Solo actualizar si la imagen actual es diferente a la por defecto
         if ($currentImageId !== $defaultImageId) {
-            error_log('[ImageHandler] ✓ Actualizando a imagen por defecto (ID: ' . $defaultImageId . ')');
+            error_log('[ImageHandler] ✓ Asignando imagen por defecto (ID: ' . $defaultImageId . ')');
             $result['imageId'] = $defaultImageId;
             $result['updated'] = true;
         } else {
-            error_log('[ImageHandler] Usuario ya tiene la imagen por defecto');
+            error_log('[ImageHandler] Usuario ya tiene la imagen por defecto, sin cambios');
         }
         
         return $result;
     }
     
     /**
-     * Obtiene el MIME type según la extensión
+     * Nombre del campo de imagen en EspoCRM (para usar en get/set)
+     */
+    public function getImageFieldName(): string
+    {
+        return self::IMAGE_FIELD;
+    }
+    
+    /**
+     * Obtiene el MIME type según la extensión del archivo
      */
     private function getMimeType(string $extension): string
     {
         $mimeTypes = [
-            'jpg' => 'image/jpeg',
+            'jpg'  => 'image/jpeg',
             'jpeg' => 'image/jpeg',
-            'png' => 'image/png',
-            'gif' => 'image/gif',
+            'png'  => 'image/png',
+            'gif'  => 'image/gif',
             'webp' => 'image/webp'
         ];
         

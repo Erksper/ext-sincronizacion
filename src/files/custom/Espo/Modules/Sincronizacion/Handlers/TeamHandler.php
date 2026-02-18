@@ -55,42 +55,21 @@ class TeamHandler
                 $cla->set('name', $nombre);
                 $this->entityManager->saveEntity($cla);
                 $creados++;
-                $this->addLog('created', 'Team', null, "{$claId}", 'success', "CLAs: {$existentes} existentes, {$creados} creados", $configId);
+                $this->addLog('created', 'Team', $claId, $nombre, 'success', "CLA creado: {$nombre}", $configId);
             } else {
                 $existentes++;
             }
         }
-        $this->addLog('updated', 'Team', null, 'CLA', 'success', "CLAs: {$existentes} existentes, {$creados} creados", $configId);
+        $this->addLog('updated', 'Team', null, 'CLAs', 'success', "CLAs: {$existentes} existentes, {$creados} creados", $configId);
     }
     
     public function syncAfiliados(array $afiliadosExternos, string $configId, array &$summary): void
     {
-        
+        // Obtener equipos existentes (solo activos, sin deleted)
         $existingTeams = [];
-        $teams = $this->entityManager->getRDBRepository('Team')->find();
-        
-        $licenciasExternas = array_column($afiliadosExternos, 'licencia');
-        
-        $teamsEliminados = $this->entityManager->getRDBRepository('Team')
-            ->where([
-                'deleted' => true,
-                'id' => $licenciasExternas
-            ])
+        $teams = $this->entityManager->getRDBRepository('Team')
+            ->where(['deleted' => false])
             ->find();
-        error_log('[muestra] ' . count($teamsEliminados));
-
-        $reactivados = 0;
-        foreach ($teamsEliminados as $team) {
-            try {
-                // REACTIVAR: poner deleted=false
-                $this->entityManager->saveEntity($team);
-                $reactivados++;                
-            } catch (\Exception $e) {
-                $this->logError("[TeamHandler] ERROR reactivando equipo {$team->getId()}: " . $e->getMessage());
-            }
-        }
-        
-        error_log("[TeamHandler] Total equipos reactivados: {$reactivados}");
         
         $oficinaCount = 0;
         foreach ($teams as $team) {
@@ -195,7 +174,7 @@ class TeamHandler
             }
         }
         
-        error_log('[TeamHandler] Finalizando sincronización de oficinas Equipos procesados: ' . count($processedTeams));
+        error_log('[TeamHandler] Finalizando sincronización de oficinas. Equipos procesados: ' . count($processedTeams));
 
         // Eliminar oficinas que ya no existen en BD externa
         error_log('[TeamHandler] Verificando oficinas a eliminar...');
@@ -213,45 +192,71 @@ class TeamHandler
         $eliminados = 0;
         foreach ($equiposActuales as $equipo) {
             $equipoId = $equipo->getId();
-            error_log("[TeamHandler] equipoo : {$equipoId}");
+            
             // Si NO es numérico, saltar (CLAs, etc)
             if (!is_numeric($equipoId)) {
-                error_log("[TeamHandler] saltado : {$equipoId}");
                 continue;
             }
-            if (in_array($equipoId, $licenciasActivas)) {
-                $esta="si";
-            }else{
-                $esta="no";
-            };
-            error_log("[TeamHandler] equipo {$equipoId} {$esta} esta");
+            
             // Si NO está en licencias activas, ELIMINAR
             if (!in_array($equipoId, $licenciasActivas)) {
-                error_log("[TeamHandler] eqipo {$eqipoid} no esta en licencias activas");
                 try {
-                    // Desactivar usuarios del equipo
+                    error_log("[TeamHandler] Oficina {$equipoId} ({$equipo->get('name')}) no está en BD externa, eliminando...");
+                    
+                    // Desactivar usuarios del equipo primero
                     $usuariosEquipo = $this->entityManager->getRDBRepository('User')
                         ->where(['defaultTeamId' => $equipoId, 'isActive' => true])
                         ->find();
                     
+                    $usuariosDesactivados = 0;
                     foreach ($usuariosEquipo as $usuario) {
                         $usuario->set('isActive', false);
                         $this->entityManager->saveEntity($usuario);
+                        $usuariosDesactivados++;
+                    }
+                    
+                    if ($usuariosDesactivados > 0) {
+                        error_log("[TeamHandler] {$usuariosDesactivados} usuarios desactivados del equipo {$equipoId}");
                     }
                     
                     // Eliminar equipo (borrado lógico)
                     $this->entityManager->removeEntity($equipo);
                     
                     $eliminados++;
-                    error_log("[TeamHandler] Equipo {$equipoId} ELIMINADO (inactivo en BD externa)");
+                    $summary['teams']['deleted']++;
+                    $this->addLog('deleted', 'Team', $equipoId, $equipo->get('name'), 'success',
+                                 "Oficina eliminada (no existe en BD externa)", $configId);
+                    error_log("[TeamHandler] ✓ Equipo {$equipoId} ELIMINADO (inactivo en BD externa)");
                     
                 } catch (\Exception $e) {
-                    $this->logError("[TeamHandler] ERROR eliminando equipo {$equipoId}: " . $e->getMessage());
+                    error_log("[TeamHandler] ERROR eliminando equipo {$equipoId}: " . $e->getMessage());
                 }
             }
         }
 
         error_log("[TeamHandler] Total equipos eliminados: {$eliminados}");
+    }
+    
+    /**
+     * Verificar si un equipo existe
+     */
+    public function teamExists(string $teamId): bool
+    {
+        try {
+            $team = $this->entityManager->getEntityById('Team', $teamId);
+            return $team !== null;
+        } catch (\Exception $e) {
+            error_log("[TeamHandler] Error verificando existencia de equipo {$teamId}: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Obtener incidencias acumuladas
+     */
+    public function getIncidencias(): array
+    {
+        return $this->incidencias;
     }
     
     /**
@@ -296,5 +301,4 @@ class TeamHandler
             error_log('[TeamHandler] Error creando log: ' . $e->getMessage());
         }
     }
-
 }

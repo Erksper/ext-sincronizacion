@@ -10,6 +10,12 @@ use Espo\Core\Utils\PasswordHash;
 
 /**
  * Manejador de sincronización de usuarios
+ * 
+ * MODELO DE SINCRONIZACIÓN:
+ * - Usuario en 21online con id=3147 → Usuario en EspoCRM con id="3147"
+ * - NO se usa campo externalId
+ * - Búsqueda por ID directo, fallback a userName para detectar conflictos
+ * - Solo se tocan usuarios con IDs numéricos (de 21online)
  */
 class UserHandler
 {
@@ -63,6 +69,7 @@ class UserHandler
     ): void {
         error_log('[UserHandler] === Sincronizando Usuarios ===');
         error_log('[UserHandler] Total usuarios externos a procesar: ' . count($usuariosExternos));
+        error_log('[UserHandler] Total usuarios inactivos: ' . count($usuariosInactivos));
         
         // Crear mapeos para búsqueda rápida
         $afiliadosMap = $this->createAfiliadosMap($afiliadosExternos);
@@ -71,45 +78,48 @@ class UserHandler
         error_log('[UserHandler] Afiliados en mapa: ' . count($afiliadosMap));
         error_log('[UserHandler] Roles en mapa: ' . count($rolesMap));
         
-        // Obtener usuarios existentes
+        // Obtener usuarios existentes (solo los de 21online - IDs numéricos)
         $existingUsers = $this->getExistingUsersMap();
 
-        $this->logInfo('[UserHandler] Usuarios existentes en mapa: ' . count($existingUsers));
-        error_log('[UserHandler] Usuarios existentes en mapa: ' . count($existingUsers));
+        $this->logInfo('[UserHandler] Usuarios existentes de 21online: ' . count($existingUsers));
 
-        $processedUsers = [];
+        $processedUsers = []; // Lista de IDs procesados exitosamente
         $contador = 0;
+        $totalUsuarios = count($usuariosExternos);
         
-        foreach ($usuariosExternos as $usuarioExterno) {
-            try {
-                $contador++;
-                $idExterno = $usuarioExterno['id'];
-                $username = $usuarioExterno['username'] ?? 'N/A';
-                
-                error_log("[UserHandler] ========================================");
-                error_log("[UserHandler] Procesando usuario {$contador}/" . count($usuariosExternos) . ": ID={$idExterno}, Username={$username}");
-                
-                $processedUsers[$idExterno] = true;
-                
-                // Validar datos básicos
+        // Procesar en lotes para evitar timeout
+        $loteSize = 50;
+        $lotes = array_chunk($usuariosExternos, $loteSize);
+        $totalLotes = count($lotes);
+        $loteActual = 0;
+        
+        error_log("[UserHandler] Procesando {$totalUsuarios} usuarios en {$totalLotes} lotes de {$loteSize}");
+        
+        // PASO 1: Procesar usuarios ACTIVOS de 21online
+        foreach ($lotes as $lote) {
+            $loteActual++;
+            error_log("[UserHandler] === LOTE {$loteActual}/{$totalLotes} ===");
+            
+            foreach ($lote as $usuarioExterno) {
+                try {
+                    $contador++;
+                    $idExterno = $usuarioExterno['id'];
+                    $username = $usuarioExterno['username'] ?? 'N/A';
+                    
+                    error_log("[UserHandler] Procesando usuario {$contador}/{$totalUsuarios}: ID={$idExterno}, Username={$username}");
+                    
+                    // Validar datos básicos
                 if (!$this->validateUserData($usuarioExterno, $summary)) {
-                    error_log("[UserHandler] Usuario {$username} NO pasó validación básica");
+                    error_log("[UserHandler] ✗ Usuario {$username} RECHAZADO por validación");
                     continue;
                 }
                 
-                error_log("[UserHandler] Usuario {$username} pasó validación básica");
-                
                 $idAfiliado = $usuarioExterno['idAfiliados'];
-                $externalId = (string)$idExterno;
-                
-                // Normalizar username para búsqueda
-                $usernameLower = strtolower(trim($usuarioExterno['username']));
-                
-                error_log("[UserHandler] Usuario {$username}: idAfiliado={$idAfiliado}, externalId={$externalId}");
+                $userId = (string)$idExterno; // ID que se usará en EspoCRM
                 
                 // Validar que existe el afiliado
                 if (!isset($afiliadosMap[$idAfiliado])) {
-                    error_log("[UserHandler] ERROR: Afiliado {$idAfiliado} no encontrado en mapa");
+                    error_log("[UserHandler] ✗ Usuario {$username} RECHAZADO: Afiliado {$idAfiliado} no encontrado");
                     $this->addIncidencia('missing_team', 'User', null, $username,
                                        "Usuario '{$username}' referencia afiliado inexistente: {$idAfiliado}");
                     $summary['users']['skipped']++;
@@ -117,68 +127,64 @@ class UserHandler
                 }
                 
                 $afiliado = $afiliadosMap[$idAfiliado];
-                $teamId = $afiliado['licencia']; // ID directo de la oficina
+                $teamId = $afiliado['licencia'];
                 $zona = $afiliado['zona'];
-                $claId = "CLA{$zona}"; // ID del CLA
-                
-                error_log("[UserHandler] Afiliado encontrado: Licencia={$afiliado['licencia']}, TeamId={$teamId}, Zona={$zona}, CLAId={$claId}");
+                $claId = "CLA{$zona}";
                 
                 // Verificar que el equipo (oficina) existe
                 if (!$this->teamHandler->teamExists($teamId)) {
-                    error_log("[UserHandler] ERROR: Equipo (oficina) {$teamId} no existe");
+                    error_log("[UserHandler] ✗ Usuario {$username} RECHAZADO: Equipo {$teamId} NO EXISTE");
                     $this->addIncidencia('missing_team', 'User', null, $username,
-                                       "Equipo no encontrado para usuario '{$username}' (Afiliado: {$idAfiliado})");
+                                       "Equipo no encontrado para usuario '{$username}'");
                     $summary['users']['skipped']++;
                     continue;
                 }
                 
                 // Verificar que el CLA existe
                 if (!$this->teamHandler->teamExists($claId)) {
-                    error_log("[UserHandler] ERROR: CLA {$claId} no existe");
+                    error_log("[UserHandler] ✗ Usuario {$username} RECHAZADO: CLA {$claId} NO EXISTE");
                     $this->addIncidencia('missing_team', 'User', null, $username,
-                                       "CLA no encontrado para usuario '{$username}' (Zona: {$zona})");
+                                       "CLA no encontrado para usuario '{$username}'");
                     $summary['users']['skipped']++;
                     continue;
                 }
                 
-                error_log("[UserHandler] Equipo {$teamId} y CLA {$claId} existen");
-                $this->logInfo("[UserHandler] Equipo {$teamId} y CLA {$claId} existen");
-                
-                // Buscar usuario existente por externalId
-                $user = $existingUsers[$externalId] ?? null;
+                // Buscar usuario existente por ID directo
+                $user = $this->entityManager->getEntityById('User', $userId);
                 
                 if (!$user) {
-                    // Si no se encontró por externalId, buscar por userName para evitar duplicados
-                    $this->logInfo("[UserHandler] Usuario NO encontrado por externalId, buscando por userName...");
-                    
+                    // No existe por ID → buscar por userName para detectar conflictos
                     $usernameLower = StringUtils::toLowerCase($usuarioExterno['username']);
                     $userByName = $this->entityManager->getRDBRepository('User')
                         ->where(['userName' => $usernameLower])
                         ->findOne();
                     
                     if ($userByName) {
-                        $this->logInfo("[UserHandler] ¡Usuario ENCONTRADO por userName! Asignando externalId...");
+                        // WARNING: Usuario existe con userName pero ID diferente
+                        $existingId = $userByName->getId();
+                        error_log("[UserHandler] ⚠ WARNING: ID desincronizado detectado!");
+                        error_log("[UserHandler]   Username: {$username}");
+                        error_log("[UserHandler]   ID en EspoCRM: {$existingId}");
+                        error_log("[UserHandler]   ID en 21online: {$userId}");
                         
-                        // Usuario existe pero sin externalId - asignar externalId
-                        $userByName->set('externalId', $externalId);
-                        $this->entityManager->saveEntity($userByName);
+                        $this->addIncidencia('id_mismatch', 'User', $existingId, $username,
+                            "Usuario con ID desincronizado - EspoCRM: {$existingId}, 21online: {$userId} - Requiere corrección manual en BD");
                         
-                        // Usar este usuario para actualizar
+                        // Usar el usuario encontrado para actualizar
                         $user = $userByName;
-                        $this->logInfo("[UserHandler] ExternalId asignado a usuario existente: {$externalId}");
                     }
                 }
                 
                 if (!$user) {
-                    error_log("[UserHandler] Usuario {$username} NO existe, creando nuevo...");
-                    $this->logInfo("[UserHandler] Usuario {$username} NO existe, creando nuevo...");
                     // Crear nuevo usuario
-                    $this->createUser($usuarioExterno, $teamId, $claId, $rolesMap, $configId, $summary);
+                    $this->createUser($usuarioExterno, $userId, $teamId, $claId, $rolesMap, $configId, $summary);
                 } else {
-                    error_log("[UserHandler] Usuario {$username} existe (ID: {$user->getId()}), actualizando...");
                     // Actualizar usuario existente
                     $this->updateUser($user, $usuarioExterno, $teamId, $claId, $rolesMap, $configId, $summary);
                 }
+                
+                // Marcar como procesado
+                $processedUsers[$userId] = true;
                 
             } catch (\Exception $e) {
                 $summary['users']['errors']++;
@@ -190,31 +196,48 @@ class UserHandler
                 $this->addLog('error', 'User', null, $username, 'error', $mensaje, $configId);
             }
         }
+            
+            // Pausa entre lotes para evitar timeout
+            if ($loteActual < $totalLotes) {
+                error_log("[UserHandler] === Lote {$loteActual}/{$totalLotes} completado ===");
+                sleep(1);
+            }
+        }
         
-        error_log('[UserHandler] Finalizando sincronización de usuarios');
-        error_log('[UserHandler] Usuarios procesados exitosamente: ' . count($processedUsers));
+        error_log('[UserHandler] Usuarios activos procesados: ' . count($processedUsers) . '/' . $totalUsuarios);
+        error_log('[UserHandler] ========================================');
+        error_log('[UserHandler] RESUMEN DE SINCRONIZACIÓN:');
+        error_log('[UserHandler] - Total usuarios en 21online: ' . $totalUsuarios);
+        error_log('[UserHandler] - Procesados exitosamente: ' . count($processedUsers));
+        error_log('[UserHandler] - Rechazados/Omitidos: ' . ($totalUsuarios - count($processedUsers)));
+        error_log('[UserHandler] - Creados: ' . ($summary['users']['created'] ?? 0));
+        error_log('[UserHandler] - Actualizados: ' . ($summary['users']['updated'] ?? 0));
+        error_log('[UserHandler] - Sin cambios: ' . ($summary['users']['no_changes'] ?? 0));
+        error_log('[UserHandler] - Errores: ' . ($summary['users']['errors'] ?? 0));
+        error_log('[UserHandler] ========================================');
         
-        // Desactivar usuarios que ya no están en BD externa o cuyo equipo no existe
-        $this->deactivateObsoleteUsers($existingUsers, $processedUsers, $configId, $summary);
+        // PASO 2: Desactivar usuarios INACTIVOS en 21online
+        $this->deactivateInactiveUsers($usuariosInactivos, $configId, $summary);
+        
+        // PASO 3 (ÚLTIMO): Desactivar usuarios sin equipo válido
+        $this->deactivateUsersWithoutTeam($processedUsers, $configId, $summary);
     }
     
     /**
-     * Crear nuevo usuario
+     * Crear nuevo usuario con ID de 21online
      */
     private function createUser(
         array $usuarioExterno,
+        string $userId,
         string $teamId,
         string $claId,
         array $rolesMap,
         string $configId,
         array &$summary
     ): void {
-        $externalId = "USR_{$usuarioExterno['id']}";
         $username = $usuarioExterno['username'] ?? 'Unknown';
         
-        $this->logInfo("[UserHandler] === CREANDO NUEVO USUARIO ===");
-        $this->logInfo("[UserHandler] ID Externo: {$externalId}");
-        $this->logInfo("[UserHandler] Username: {$username}");
+        $this->logInfo("[UserHandler] Creando usuario: {$username} (ID: {$userId})");
         
         // Preparar datos del usuario
         $userData = $this->prepareUserData($usuarioExterno, $teamId, $rolesMap);
@@ -225,55 +248,45 @@ class UserHandler
             return;
         }
         
-        $this->logInfo("[UserHandler] Datos preparados: userName={$userData['userName']}, firstName={$userData['firstName']}, lastName={$userData['lastName']}");
-        
-        // VERIFICAR NUEVAMENTE que no exista por userName antes de crear
-        $existingUser = $this->entityManager->getRDBRepository('User')
-            ->where(['userName' => $userData['userName']])
-            ->findOne();
-        
-        if ($existingUser) {
-            $this->logError("[UserHandler] ERROR CRÍTICO: Usuario con userName '{$userData['userName']}' YA EXISTE!");
-            $this->logError("[UserHandler] ID del usuario existente: " . $existingUser->getId());
-            $this->logError("[UserHandler] ExternalId del usuario existente: " . ($existingUser->get('externalId') ?? 'NULL'));
-            
-            // Asignar externalId y actualizar en lugar de crear
-            $existingUser->set('externalId', $externalId);
-            $this->entityManager->saveEntity($existingUser);
-            
-            $this->logInfo("[UserHandler] Convirtiendo a actualización en lugar de creación");
-            $this->updateUser($existingUser, $usuarioExterno, $teamId, $claId, $rolesMap, $configId, $summary);
-            return;
-        }
-        
-        $this->logInfo("[UserHandler] Verificación OK: userName '{$userData['userName']}' no existe, procediendo a crear...");
-        
-        // Crear usuario
+        // Crear usuario con ID de 21online
         $user = $this->entityManager->getNewEntity('User');
+        $user->set('id', $userId); // CRÍTICO: Asignar ID de 21online
         $user->set($userData);
         
         // Establecer contraseña
         $hashedPassword = $this->passwordHash->hash($usuarioExterno['password']);
         $user->set('password', $hashedPassword);
         
-        $this->logInfo("[UserHandler] Guardando usuario en BD...");
-        
         try {
             $this->entityManager->saveEntity($user);
-            $this->logInfo("[UserHandler] ✓ Usuario guardado exitosamente con ID: " . $user->getId());
+            $this->logInfo("[UserHandler] ✓ Usuario creado con ID: {$userId}");
         } catch (\Exception $e) {
-            $this->logError("[UserHandler] ERROR al guardar usuario: " . $e->getMessage());
+            $this->logError("[UserHandler] ERROR CRÍTICO al guardar usuario: " . $e->getMessage());
+            $this->logError("[UserHandler] Usuario: {$username}, ID: {$userId}");
+            $this->logError("[UserHandler] Stack trace: " . $e->getTraceAsString());
+            $summary['users']['errors']++;
+            $this->addIncidencia('create_error', 'User', $userId, $username, 
+                "Error al crear usuario: " . $e->getMessage());
             throw $e;
+        }
+        
+        // Procesar imagen UNA SOLA VEZ al crear
+        $imageFieldName = $this->imageHandler->getImageFieldName();
+        $fotoPath = $usuarioExterno['fotoPath'] ?? null;
+        $imageResult = $this->imageHandler->processUserImage($fotoPath, null);
+        
+        if ($imageResult['imageId']) {
+            $user->set($imageFieldName, $imageResult['imageId']);
+            $this->entityManager->saveEntity($user);
+            error_log("[UserHandler] ✓ Imagen asignada al nuevo usuario");
         }
         
         // Asignar a AMBOS equipos: oficina (por defecto) y CLA
         $this->assignUserToTeams($user, $teamId, $claId);
         
         $summary['users']['created']++;
-        $this->addLog('created', 'User', $user->getId(), $userData['userName'], 'success',
+        $this->addLog('created', 'User', $userId, $userData['userName'], 'success',
                      "Usuario '{$userData['userName']}' creado", $configId);
-        error_log("[UserHandler] Usuario creado: {$userData['userName']}");
-        $this->logInfo("[UserHandler] ✓✓✓ Usuario creado exitosamente: {$userData['userName']}");
     }
     
     /**
@@ -289,160 +302,183 @@ class UserHandler
         array &$summary
     ): void {
         $username = $user->get('userName');
-        error_log("[UserHandler] --- Actualizando usuario: {$username} ---");
         
         $changes = [];
         $needsUpdate = false;
         
         // Verificar que el equipo del usuario existe
         $currentTeamId = $user->get('defaultTeamId');
-        error_log("[UserHandler] defaultTeamId actual: " . ($currentTeamId ?? 'NULL'));
         
-        if ($currentTeamId) {
-            // Si el equipo actual no existe, desactivar usuario
-            if (!$this->teamHandler->teamExists($currentTeamId)) {
-                error_log("[UserHandler] ¡Equipo del usuario NO existe! Desactivando usuario");
-                if ($user->get('isActive')) {
-                    $user->set('isActive', false);
-                    $needsUpdate = true;
-                    $changes[] = "desactivado por equipo inexistente";
-                    $this->addIncidencia('missing_team', 'User', $user->getId(), $username,
-                                       "Usuario desactivado porque su equipo no existe");
-                }
+        if ($currentTeamId && !$this->teamHandler->teamExists($currentTeamId)) {
+            if ($user->get('isActive')) {
+                $user->set('isActive', false);
+                $needsUpdate = true;
+                $changes[] = "desactivado por equipo inexistente";
+                $this->addIncidencia('missing_team', 'User', $user->getId(), $username,
+                                   "Usuario desactivado porque su equipo no existe");
             }
         }
         
         // Preparar datos actualizados
-        error_log("[UserHandler] Preparando datos actualizados...");
         $userData = $this->prepareUserData($usuarioExterno, $teamId, $rolesMap);
         
         if (!$userData) {
-            error_log("[UserHandler] ERROR: No se pudieron preparar datos del usuario");
             return;
         }
         
-        error_log("[UserHandler] Datos preparados correctamente");
-        
-        // Comparar campos
+        // Comparar campos (excepto roles que se maneja aparte)
         foreach ($userData as $field => $newValue) {
-            $currentValue = $user->get($field);
-            
-            // Manejar campos que son arrays (como rolesIds)
-            if (is_array($newValue)) {
-                error_log("[UserHandler] Comparando campo array '{$field}'");
-                
-                // Comparar arrays
-                $currentArray = is_array($currentValue) ? $currentValue : [];
-                $newArray = $newValue;
-                
-                sort($currentArray);
-                sort($newArray);
-                
-                if ($currentArray !== $newArray) {
-                    $user->set($field, $newValue);
-                    $needsUpdate = true;
-                    $changes[] = "{$field} actualizado";
-                    error_log("[UserHandler] ✓ Cambio detectado en {$field}");
-                }
-                continue;
+            if ($field === 'rolesIds') {
+                continue; // Roles se manejan con lógica especial
             }
             
-            // Normalizar para comparación (solo strings)
+            $currentValue = $user->get($field);
+            
+            // Normalizar para comparación
             $normalizedCurrent = StringUtils::normalize($currentValue);
             $normalizedNew = StringUtils::normalize($newValue);
-            
-            error_log("[UserHandler] Comparando campo '{$field}': '{$normalizedCurrent}' vs '{$normalizedNew}'");
             
             if ($normalizedCurrent !== $normalizedNew) {
                 $user->set($field, $newValue);
                 $needsUpdate = true;
-                $changes[] = "{$field}: '{$currentValue}' -> '{$newValue}'";
-                error_log("[UserHandler] ✓ Cambio detectado en {$field}");
+                $changes[] = "{$field}";
             }
         }
         
-        // Verificar contraseña
+        // ROLES: Lógica aditiva - mantener roles extras, solo actualizar rol de 21online
+        $rolesChanged = $this->updateUserRoles($user, $userData['rolesIds'] ?? [], $rolesMap);
+        if ($rolesChanged) {
+            $needsUpdate = true;
+            $changes[] = "roles";
+        }
+        
+        // Verificar contraseña usando password_verify()
         if (!empty($usuarioExterno['password'])) {
             $currentPasswordHash = $user->get('password');
-            $newPassword = $usuarioExterno['password'];
+            $plainPassword = $usuarioExterno['password'];
             
-            error_log("[UserHandler] Verificando contraseña...");
+            $passwordChanged = empty($currentPasswordHash) || !password_verify($plainPassword, $currentPasswordHash);
             
-            // Verificar si la contraseña cambió
-            if (!$this->passwordHash->check($newPassword, $currentPasswordHash)) {
-                error_log("[UserHandler] ✓ Contraseña cambió, actualizando hash");
-                $hashedPassword = $this->passwordHash->hash($newPassword);
+            if ($passwordChanged) {
+                $hashedPassword = $this->passwordHash->hash($plainPassword);
                 $user->set('password', $hashedPassword);
                 $needsUpdate = true;
-                $changes[] = "contraseña actualizada";
-            } else {
-                error_log("[UserHandler] Contraseña sin cambios");
+                $changes[] = "password";
             }
         }
         
-        // Verificar imagen
-        error_log("[UserHandler] Verificando imagen...");
-        $imageResult = $this->imageHandler->processUserImage(
-            $usuarioExterno['fotoPath'] ?? null,
-            $user->get('cImageId')
-        );
+        // Verificar imagen usando cFoto para comparar URL
+        $imageFieldName = $this->imageHandler->getImageFieldName();
+        $fotoPath = $usuarioExterno['fotoPath'] ?? null;
+        $fotoUrlNueva = !empty($fotoPath) ? 'https://venezuela.21online.lat/' . ltrim($fotoPath, '/') : null;
+        $fotoUrlActual = $user->get('cFoto');
         
-        if ($imageResult['updated']) {
-            error_log("[UserHandler] ✓ Imagen actualizada");
-            $user->set('cImageId', $imageResult['imageId']);
-            $needsUpdate = true;
-            $changes[] = "imagen actualizada";
-        } else {
-            error_log("[UserHandler] Imagen sin cambios");
+        if ($fotoUrlNueva !== $fotoUrlActual) {
+            $imageResult = $this->imageHandler->processUserImage($fotoPath, $user->get($imageFieldName));
+            
+            if ($imageResult['updated']) {
+                $user->set($imageFieldName, $imageResult['imageId']);
+                $needsUpdate = true;
+                $changes[] = "imagen";
+            }
         }
         
         // Guardar si hay cambios
         if ($needsUpdate) {
-            error_log("[UserHandler] Guardando cambios en usuario {$username}...");
             $this->entityManager->saveEntity($user);
             
             // Verificar si cambió de equipo
-            $currentDefaultTeam = $user->get('defaultTeamId');
-            
-            if ($currentDefaultTeam !== $teamId) {
-                error_log("[UserHandler] Cambiando equipos del usuario...");
+            if ($user->get('defaultTeamId') !== $teamId) {
                 $this->assignUserToTeams($user, $teamId, $claId);
-                $changes[] = "equipos actualizados";
+                $changes[] = "equipos";
             }
             
             $summary['users']['updated']++;
             $changesStr = implode(', ', $changes);
             $this->addLog('updated', 'User', $user->getId(), $username, 'success',
                          "Usuario actualizado: {$changesStr}", $configId);
-            error_log("[UserHandler] ✓ Usuario actualizado exitosamente: {$username} ({$changesStr})");
         } else {
             $summary['users']['no_changes']++;
-            error_log("[UserHandler] Usuario {$username} sin cambios necesarios");
         }
     }
     
     /**
+     * Actualizar roles del usuario (lógica aditiva)
+     * Mantiene roles extras, solo actualiza el rol de 21online
+     */
+    private function updateUserRoles($user, array $rolesIds21online, array $rolesMap21online): bool
+    {
+        // Obtener roles actuales del usuario
+        $currentRoles = $user->get('roles');
+        $currentRoleIds = [];
+        if ($currentRoles) {
+            foreach ($currentRoles as $role) {
+                $currentRoleIds[] = $role->getId();
+            }
+        }
+        
+        // Identificar cuáles son roles de 21online
+        $roles21onlineIds = array_values($rolesMap21online);
+        
+        // Separar: roles de 21online vs roles extras (añadidos en EspoCRM)
+        $rolesExtras = array_diff($currentRoleIds, $roles21onlineIds);
+        
+        // Combinar: nuevos roles de 21online + roles extras
+        $newRoleIds = array_merge($rolesIds21online, $rolesExtras);
+        
+        // Comparar
+        sort($currentRoleIds);
+        sort($newRoleIds);
+        
+        if ($currentRoleIds !== $newRoleIds) {
+            $user->set('rolesIds', $newRoleIds);
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
      * Preparar datos de usuario formateados correctamente
+     * Campos opcionales: nombre, apellidos, email, teléfono
      */
     private function prepareUserData(array $usuarioExterno, string $teamId, array $rolesMap): ?array
     {
-        // Formatear nombre y apellidos
-        $firstName = StringUtils::capitalizeWords($usuarioExterno['nombre']);
+        // Username (obligatorio, ya validado)
+        $userName = StringUtils::toLowerCase($usuarioExterno['username']);
+        
+        // Nombre: Si existe usar el nombre, sino usar username
+        $firstName = !empty($usuarioExterno['nombre']) 
+            ? StringUtils::capitalizeWords($usuarioExterno['nombre'])
+            : StringUtils::capitalizeWords($usuarioExterno['username']);
+        
+        if (empty($usuarioExterno['nombre'])) {
+            error_log("[UserHandler] Usuario {$userName}: sin nombre, usando username como firstName");
+        }
+        
+        // Apellido: Combinar apellidos si existen, sino dejar NULL
         $lastName = StringUtils::combineApellidos(
             $usuarioExterno['apellidoP'] ?? null,
             $usuarioExterno['apellidoM'] ?? null
         );
         
-        if (empty($firstName) || empty($lastName)) {
-            $this->addIncidencia('validation_error', 'User', null, $usuarioExterno['username'] ?? 'Unknown',
-                               "Usuario sin nombre o apellido completo");
-            return null;
+        if (empty($lastName)) {
+            error_log("[UserHandler] Usuario {$userName}: sin apellidos, dejando lastName vacío");
         }
         
-        // Formatear campos en minúsculas
-        $userName = StringUtils::toLowerCase($usuarioExterno['username']);
-        $emailAddress = StringUtils::toLowerCase($usuarioExterno['email']);
-        $phoneNumber = StringUtils::toLowerCase($usuarioExterno['telMovil'] ?? null);
+        // Email: Si existe usar email, sino dejar NULL
+        $emailAddress = !empty($usuarioExterno['email'])
+            ? StringUtils::toLowerCase($usuarioExterno['email'])
+            : null;
+        
+        if (empty($usuarioExterno['email'])) {
+            error_log("[UserHandler] Usuario {$userName}: sin email, dejando emailAddress vacío");
+        }
+        
+        // Teléfono: Opcional
+        $phoneNumber = !empty($usuarioExterno['telMovil']) 
+            ? StringUtils::toLowerCase($usuarioExterno['telMovil']) 
+            : null;
         
         // Obtener equipo
         $team = $this->entityManager->getEntityById('Team', $teamId);
@@ -452,39 +488,47 @@ class UserHandler
             return null;
         }
         
-        // Obtener rol
+        // Obtener rol de 21online (obligatorio, ya validado)
         $roleId = null;
         $puesto = $usuarioExterno['puesto'] ?? null;
         if (!empty($puesto) && isset($rolesMap[$puesto])) {
             $roleId = $rolesMap[$puesto];
+        } else {
+            // Si el rol no existe en el mapa, es un error
+            $this->addIncidencia('missing_role', 'User', null, $userName,
+                               "Rol '{$puesto}' no encontrado en EspoCRM");
+            return null;
         }
         
-        // Procesar imagen
-        $imageResult = $this->imageHandler->processUserImage(
-            $usuarioExterno['fotoPath'] ?? null,
-            null // Para usuarios nuevos no hay imagen actual
-        );
+        // Construir URL de foto (opcional, sin descargar aún)
+        $fotoPath = $usuarioExterno['fotoPath'] ?? null;
+        $fotoUrl = !empty($fotoPath) ? 'https://venezuela.21online.lat/' . ltrim($fotoPath, '/') : null;
         
         $userData = [
-            'externalId' => "USR_{$usuarioExterno['id']}",
             'userName' => $userName,
             'firstName' => $firstName,
-            'lastName' => $lastName,
-            'emailAddress' => $emailAddress,
             'defaultTeamId' => $team->getId(),
-            'isActive' => true
+            'isActive' => true,
+            'rolesIds' => [$roleId]
         ];
+        
+        // Apellido: solo si existe
+        if (!empty($lastName)) {
+            $userData['lastName'] = $lastName;
+        }
+        
+        // Email: solo si existe
+        if (!empty($emailAddress)) {
+            $userData['emailAddress'] = $emailAddress;
+        }
         
         if (!empty($phoneNumber)) {
             $userData['phoneNumber'] = $phoneNumber;
         }
         
-        if ($roleId) {
-            $userData['rolesIds'] = [$roleId];
-        }
-        
-        if ($imageResult['imageId']) {
-            $userData['cImageId'] = $imageResult['imageId'];
+        // Guardar URL de foto para comparación futura (campo cFoto)
+        if ($fotoUrl !== null) {
+            $userData['cFoto'] = $fotoUrl;
         }
         
         return $userData;
@@ -495,8 +539,6 @@ class UserHandler
      */
     private function assignUserToTeams($user, string $oficinaId, string $claId): void
     {
-        error_log("[UserHandler] Asignando usuario a oficina {$oficinaId} y CLA {$claId}");
-        
         $oficina = $this->entityManager->getEntityById('Team', $oficinaId);
         $cla = $this->entityManager->getEntityById('Team', $claId);
         
@@ -521,14 +563,10 @@ class UserHandler
                 ->getRelation($user, 'teams')
                 ->relate($oficina);
             
-            error_log("[UserHandler] ✓ Usuario asignado a oficina {$oficinaId}");
-            
             // Asignar CLA
             $this->entityManager->getRDBRepository('User')
                 ->getRelation($user, 'teams')
                 ->relate($cla);
-            
-            error_log("[UserHandler] ✓ Usuario asignado a CLA {$claId}");
                 
         } catch (\Exception $e) {
             error_log("[UserHandler] Error asignando equipos: " . $e->getMessage());
@@ -536,72 +574,195 @@ class UserHandler
     }
     
     /**
-     * Desactivar usuarios obsoletos o sin equipo
+     * Desactivar usuarios que están inactivos en 21online
+     * Busca primero por ID, luego por userName
+     * Verifica si el userName está en lista de activos antes de reportar conflicto
      */
-    private function deactivateObsoleteUsers(
-        array $existingUsersData,
+    private function deactivateInactiveUsers(
+        array $usuariosInactivos,
+        string $configId,
+        array &$summary
+    ): void {
+        $this->logInfo('[UserHandler] Desactivando usuarios inactivos de 21online...');
+        
+        // Crear mapa de usernames activos para verificación rápida
+        $activeUsernames = [];
+        $activeUsers = $this->entityManager->getRDBRepository('User')
+            ->where(['isActive' => true])
+            ->find();
+        
+        foreach ($activeUsers as $activeUser) {
+            $userId = $activeUser->getId();
+            if (is_numeric($userId)) {
+                $activeUsernames[$activeUser->get('userName')] = $userId;
+            }
+        }
+        
+        error_log("[UserHandler] Usuarios activos en EspoCRM (21online): " . count($activeUsernames));
+        
+        $contadorDesactivados = 0;
+        $contadorNoEncontrados = 0;
+        
+        foreach ($usuariosInactivos as $usuarioInactivo) {
+            try {
+                $userId = (string)$usuarioInactivo['id'];
+                $username = StringUtils::toLowerCase($usuarioInactivo['username'] ?? 'Unknown');
+                
+                // Buscar por ID primero
+                $user = $this->entityManager->getEntityById('User', $userId);
+                
+                // Si no existe por ID, buscar por userName
+                if (!$user) {
+                    $user = $this->entityManager->getRDBRepository('User')
+                        ->where(['userName' => $username])
+                        ->findOne();
+                    
+                    if ($user) {
+                        $existingId = $user->getId();
+                        
+                        // Verificar si el userName está en la lista de ACTIVOS
+                        if (isset($activeUsernames[$username])) {
+                            // Usuario está ACTIVO en 21online con este userName
+                            // No hay conflicto real - el inactivo simplemente no existe
+                            error_log("[UserHandler] Usuario {$username} inactivo en 21online pero activo con ID {$existingId} - OK");
+                            continue;
+                        }
+                        
+                        // Usuario existe con ID diferente y NO está en activos
+                        error_log("[UserHandler] ⚠ Usuario inactivo con ID desincronizado:");
+                        error_log("[UserHandler]   Username: {$username}");
+                        error_log("[UserHandler]   ID en EspoCRM: {$existingId}");
+                        error_log("[UserHandler]   ID en 21online (inactivo): {$userId}");
+                        
+                        $this->addIncidencia('id_mismatch_inactive', 'User', $existingId, $username,
+                            "Usuario inactivo con ID desincronizado - EspoCRM: {$existingId}, 21online: {$userId}");
+                    } else {
+                        // No existe ni por ID ni por userName
+                        $contadorNoEncontrados++;
+                        if ($contadorNoEncontrados <= 10) { // Limitar logs
+                            error_log("[UserHandler] Usuario inactivo {$username} (ID: {$userId}) no existe en EspoCRM");
+                        }
+                        continue;
+                    }
+                }
+                
+                // Desactivar si está activo
+                if ($user && $user->get('isActive')) {
+                    $user->set('isActive', false);
+                    $this->entityManager->saveEntity($user);
+                    
+                    $contadorDesactivados++;
+                    $summary['users']['disabled']++;
+                    
+                    $this->addLog('disabled', 'User', $user->getId(), $user->get('userName'), 'success',
+                                 "Usuario desactivado (inactivo en 21online)", $configId);
+                    error_log("[UserHandler] ✓ Usuario desactivado: {$user->get('userName')} (inactivo en 21online)");
+                }
+                
+            } catch (\Exception $e) {
+                error_log("[UserHandler] ERROR desactivando usuario inactivo: " . $e->getMessage());
+            }
+        }
+        
+        if ($contadorNoEncontrados > 10) {
+            error_log("[UserHandler] ... y " . ($contadorNoEncontrados - 10) . " usuarios inactivos más no encontrados");
+        }
+        
+        $this->logInfo("[UserHandler] Total usuarios desactivados por inactividad: {$contadorDesactivados}");
+        $this->logInfo("[UserHandler] Usuarios inactivos no encontrados: {$contadorNoEncontrados}");
+    }
+    
+    /**
+     * Desactivar usuarios activos en 21online pero sin equipo válido
+     * Este paso se ejecuta AL FINAL para evitar reactivaciones accidentales
+     */
+    private function deactivateUsersWithoutTeam(
         array $processedUsers,
         string $configId,
         array &$summary
     ): void {
-        $existingUsersByExternalId = $existingUsersData['byExternalId'];
+        $this->logInfo('[UserHandler] Verificando usuarios sin equipo válido...');
         
-        foreach ($existingUsersByExternalId as $externalId => $user) {
-            $userId = str_replace('USR_', '', $externalId);
+        $contadorDesactivados = 0;
+        
+        // Obtener TODOS los usuarios de 21online (IDs numéricos)
+        $users = $this->entityManager->getRDBRepository('User')->find();
+        
+        foreach ($users as $user) {
+            $userId = $user->getId();
             
-            if (!isset($processedUsers[$userId])) {
-                // Usuario ya no existe en BD externa
+            // Solo usuarios de 21online (IDs numéricos)
+            if (!is_numeric($userId)) {
+                continue;
+            }
+            
+            // Si fue procesado exitosamente, saltar
+            if (isset($processedUsers[$userId])) {
+                continue;
+            }
+            
+            // Usuario de 21online que NO fue procesado → verificar equipo
+            $defaultTeamId = $user->get('defaultTeamId');
+            
+            if (!$defaultTeamId || !$this->teamHandler->teamExists($defaultTeamId)) {
                 if ($user->get('isActive')) {
                     $user->set('isActive', false);
                     $this->entityManager->saveEntity($user);
                     
+                    $contadorDesactivados++;
                     $summary['users']['disabled']++;
-                    $this->addLog('disabled', 'User', $user->getId(), $user->get('userName'), 'success',
-                                 "Usuario desactivado (no existe en BD externa)", $configId);
-                    error_log("[UserHandler] Usuario desactivado: {$user->get('userName')}");
-                }
-            } else {
-                // Verificar que su equipo existe
-                $defaultTeamId = $user->get('defaultTeamId');
-                if ($defaultTeamId) {
-                    if (!$this->teamHandler->teamExists($defaultTeamId)) {
-                        if ($user->get('isActive')) {
-                            $user->set('isActive', false);
-                            $this->entityManager->saveEntity($user);
-                            
-                            $summary['users']['disabled']++;
-                            $this->addLog('disabled', 'User', $user->getId(), $user->get('userName'), 'success',
-                                         "Usuario desactivado (equipo no existe)", $configId);
-                            error_log("[UserHandler] Usuario desactivado por equipo inexistente: {$user->get('userName')}");
-                        }
-                    }
+                    
+                    $this->addLog('disabled', 'User', $userId, $user->get('userName'), 'success',
+                                 "Usuario desactivado (equipo no existe)", $configId);
+                    error_log("[UserHandler] ✓ Usuario desactivado por equipo inexistente: {$user->get('userName')}");
                 }
             }
         }
+        
+        $this->logInfo("[UserHandler] Usuarios desactivados por equipo inexistente: {$contadorDesactivados}");
     }
     
     /**
-     * Validar datos básicos del usuario
+     * Validar datos básicos del usuario (solo campos OBLIGATORIOS)
      */
     private function validateUserData(array $usuarioExterno, array &$summary): bool
     {
-        if (empty($usuarioExterno['username'])) {
+        // ID es obligatorio
+        if (empty($usuarioExterno['id'])) {
             $this->addIncidencia('validation_error', 'User', null, 'Unknown',
-                               "Usuario sin nombre de usuario (username)");
+                               "Usuario sin ID");
             $summary['users']['skipped']++;
             return false;
         }
         
-        if (empty($usuarioExterno['email'])) {
-            $this->addIncidencia('validation_error', 'User', null, $usuarioExterno['username'],
-                               "Usuario '{$usuarioExterno['username']}' sin email");
+        // Username es obligatorio
+        if (empty($usuarioExterno['username'])) {
+            $this->addIncidencia('validation_error', 'User', $usuarioExterno['id'], 'Unknown',
+                               "Usuario ID {$usuarioExterno['id']} sin username");
             $summary['users']['skipped']++;
             return false;
         }
         
-        if (empty($usuarioExterno['nombre'])) {
-            $this->addIncidencia('validation_error', 'User', null, $usuarioExterno['username'],
-                               "Usuario '{$usuarioExterno['username']}' sin nombre");
+        // idAfiliados es obligatorio
+        if (empty($usuarioExterno['idAfiliados'])) {
+            $this->addIncidencia('validation_error', 'User', $usuarioExterno['id'], $usuarioExterno['username'],
+                               "Usuario '{$usuarioExterno['username']}' sin idAfiliados");
+            $summary['users']['skipped']++;
+            return false;
+        }
+        
+        // password es obligatorio
+        if (empty($usuarioExterno['password'])) {
+            $this->addIncidencia('validation_error', 'User', $usuarioExterno['id'], $usuarioExterno['username'],
+                               "Usuario '{$usuarioExterno['username']}' sin password");
+            $summary['users']['skipped']++;
+            return false;
+        }
+        
+        // puesto es obligatorio
+        if (empty($usuarioExterno['puesto'])) {
+            $this->addIncidencia('validation_error', 'User', $usuarioExterno['id'], $usuarioExterno['username'],
+                               "Usuario '{$usuarioExterno['username']}' sin puesto (rol)");
             $summary['users']['skipped']++;
             return false;
         }
@@ -642,29 +803,27 @@ class UserHandler
     }
     
     /**
-     * Obtener mapa de usuarios existentes SOLO por externalId
+     * Obtener mapa de usuarios existentes de 21online (solo IDs numéricos)
      */
     private function getExistingUsersMap(): array
     {
-        $this->logInfo('[UserHandler] Obteniendo usuarios existentes...');
+        $this->logInfo('[UserHandler] Obteniendo usuarios existentes de 21online...');
         
         $map = [];
         
         try {
-            $users = $this->entityManager->getRDBRepository('User')
-                ->where(['externalId!=' => null])
-                ->find();
-            
-            $this->logInfo('[UserHandler] Usuarios con externalId encontrados: ' . count($users));
+            $users = $this->entityManager->getRDBRepository('User')->find();
             
             foreach ($users as $user) {
-                $externalId = $user->get('externalId');
-                if ($externalId) {
-                    $map[$externalId] = $user;
+                $userId = $user->getId();
+                
+                // Solo usuarios de 21online (IDs numéricos)
+                if (is_numeric($userId)) {
+                    $map[$userId] = $user;
                 }
             }
             
-            $this->logInfo('[UserHandler] Mapa de usuarios creado: ' . count($map) . ' usuarios');
+            $this->logInfo('[UserHandler] Usuarios de 21online encontrados: ' . count($map));
             
         } catch (\Exception $e) {
             $this->logError('[UserHandler] ERROR en getExistingUsersMap: ' . $e->getMessage());
@@ -722,59 +881,5 @@ class UserHandler
         } catch (\Exception $e) {
             error_log('[UserHandler] Error creando log: ' . $e->getMessage());
         }
-    }
-    
-    /**
-     * Desactivar usuarios que están inactivos en BD externa
-     */
-    private function deactivateInactiveUsers(
-        array $usuariosInactivos,
-        array $existingUsers,
-        string $configId,
-        array &$summary
-    ): void {
-        $this->logInfo('[UserHandler] Desactivando usuarios inactivos de BD externa...');
-        error_log('[UserHandler] Desactivando usuarios inactivos de BD externa...');
-        
-        $contadorDesactivados = 0;
-        
-        foreach ($usuariosInactivos as $usuarioInactivo) {
-            try {
-                $idExterno = $usuarioInactivo['id'];
-                $externalId = "USR_{$idExterno}";
-                $username = $usuarioInactivo['username'] ?? 'Unknown';
-                
-                // Buscar si existe en EspoCRM
-                if (isset($existingUsers[$externalId])) {
-                    $user = $existingUsers[$externalId];
-                    
-                    // Si está activo, desactivarlo
-                    if ($user->get('isActive')) {
-                        $user->set('isActive', false);
-                        $this->entityManager->saveEntity($user);
-                        
-                        $contadorDesactivados++;
-                        $summary['users']['disabled']++;
-                        
-                        $this->addLog('disabled', 'User', $user->getId(), $user->get('userName'), 'success',
-                                     "Usuario desactivado (inactivo en BD externa)", $configId);
-                        error_log("[UserHandler] ✓ Usuario desactivado: {$user->get('userName')} (inactivo en BD externa)");
-                        $this->logInfo("[UserHandler] ✓ Usuario desactivado: {$user->get('userName')} (inactivo en BD externa)");
-                    } else {
-                        error_log("[UserHandler] Usuario {$username} ya está inactivo");
-                    }
-                } else {
-                    error_log("[UserHandler] Usuario inactivo {$username} no existe en EspoCRM (se ignora)");
-                }
-                
-            } catch (\Exception $e) {
-                error_log("[UserHandler] ERROR desactivando usuario inactivo: " . $e->getMessage());
-                $this->logError("[UserHandler] ERROR desactivando usuario inactivo: " . $e->getMessage());
-            }
-        }
-        
-        $mensaje = "[UserHandler] Total usuarios desactivados por estar inactivos en BD externa: {$contadorDesactivados}";
-        error_log($mensaje);
-        $this->logInfo($mensaje);
     }
 }
