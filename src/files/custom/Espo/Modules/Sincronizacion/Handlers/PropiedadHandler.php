@@ -11,6 +11,34 @@ class PropiedadHandler
 
     private EntityManager $entityManager;
     
+    // Lista de campos que deben tratarse como numéricos (para formato con 2 decimales)
+    private array $numericFields = [
+        'comision',
+        'precioEnContrato',
+        'precioVenta',
+        'precioRenta',
+        'm2T',
+        'm2C',
+        'edad'
+    ];
+    
+    // Campos booleanos
+    private array $booleanFields = [
+        'enInternet'
+    ];
+    
+    // Campos de dirección (se limpian de signos de puntuación)
+    private array $addressFields = [
+        'calle',
+        'numero',
+        'municipio',
+        'urbanizacion',
+        'ciudad',
+        'estado',
+        'pais',
+        'infoExtraPrecio'
+    ];
+    
     public function __construct(EntityManager $entityManager)
     {
         $this->entityManager = $entityManager;
@@ -22,6 +50,8 @@ class PropiedadHandler
         string $configId,
         array &$summary
     ): void {
+        $startTime = microtime(true);
+        
         $whereClause = '';
         if ($syncType === 'anual') {
             $whereClause = 'WHERE fechaModificacion >= DATE_SUB(NOW(), INTERVAL 12 MONTH)';
@@ -95,12 +125,15 @@ class PropiedadHandler
             }
         }
         
+        $elapsed = round(microtime(true) - $startTime, 2);
+        
         $this->log('info', 'Propiedades', null, 'Resumen Final', 'success',
                   "Creadas: {$summary['propiedades']['created']} | " .
                   "Actualizadas: {$summary['propiedades']['updated']} | " .
                   "Sin cambios: {$summary['propiedades']['no_changes']} | " .
                   "Omitidas: {$summary['propiedades']['skipped']} | " .
-                  "Errores: {$summary['propiedades']['errors']}", $configId);
+                  "Errores: {$summary['propiedades']['errors']} | " .
+                  "Tiempo: {$elapsed}s", $configId);
     }
     
     private function syncPropiedad(
@@ -137,10 +170,10 @@ class PropiedadHandler
         ];
         
         foreach ($camposObligatorios as $campo => $nombre) {
-            if (empty($propiedadExterna[$campo])) {
+            $valor = $propiedadExterna[$campo] ?? null;
+            if ($valor === null || (is_string($valor) && trim($valor) === '')) {
                 $id = $propiedadExterna['id'] ?? 'Unknown';
                 $summary['propiedades']['skipped']++;
-                
                 $this->log('info', 'Propiedades', $id, "ID {$id}", 'warning',
                           "Propiedad omitida: falta campo '{$nombre}'", $configId);
                 return false;
@@ -200,10 +233,12 @@ class PropiedadHandler
         
         foreach ($propiedadData as $field => $newValue) {
             $currentValue = $propiedad->get($field);
-            $normalizedCurrent = StringUtils::normalize($currentValue);
-            $normalizedNew = StringUtils::normalize($newValue);
             
-            if ($normalizedCurrent !== $normalizedNew) {
+            // Normalizar según el tipo de campo
+            $currentNorm = $this->normalizeValue($currentValue, $field);
+            $newNorm = $this->normalizeValue($newValue, $field);
+            
+            if ($currentNorm !== $newNorm) {
                 $propiedad->set($field, $newValue);
                 $needsUpdate = true;
                 $changes[] = $field;
@@ -229,6 +264,36 @@ class PropiedadHandler
         } else {
             $summary['propiedades']['no_changes']++;
         }
+    }
+    
+    /**
+     * Normaliza un valor según el tipo de campo, devolviendo siempre un string.
+     */
+    private function normalizeValue($value, string $field): string
+    {
+        // Si es null, devolvemos string vacío
+        if ($value === null) {
+            return '';
+        }
+        
+        if (in_array($field, $this->booleanFields)) {
+            // Booleano: convertir a '0' o '1'
+            return $value ? '1' : '0';
+        }
+        
+        if (in_array($field, $this->numericFields)) {
+            // Numérico: convertir a float y formatear con 2 decimales
+            $float = floatval($value);
+            return number_format($float, 2, '.', '');
+        }
+        
+        if (in_array($field, $this->addressFields)) {
+            // Dirección: limpiar signos de puntuación y normalizar
+            return StringUtils::normalizeAddress($value);
+        }
+        
+        // Otros campos de texto: normalización simple
+        return StringUtils::normalize($value);
     }
     
     private function preparePropiedadData(array $propiedadExterna): ?array
@@ -278,7 +343,7 @@ class PropiedadHandler
         ];
         
         foreach ($camposOpcionales as $campoEspo => $campo21online) {
-            if (!empty($propiedadExterna[$campo21online])) {
+            if (isset($propiedadExterna[$campo21online]) && $propiedadExterna[$campo21online] !== '') {
                 $data[$campoEspo] = $propiedadExterna[$campo21online];
             }
         }

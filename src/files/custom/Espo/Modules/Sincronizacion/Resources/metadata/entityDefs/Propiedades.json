@@ -79,27 +79,27 @@
         },
         "numero": {
             "type": "varchar",
-            "maxLength": 50,
+            "maxLength": 255,
             "trim": true
         },
         "municipio": {
             "type": "varchar",
-            "maxLength": 150,
+            "maxLength": 255,
             "trim": true
         },
         "urbanizacion": {
             "type": "varchar",
-            "maxLength": 150,
+            "maxLength": 255,
             "trim": true
         },
         "ciudad": {
             "type": "varchar",
-            "maxLength": 150,
+            "maxLength": 255,
             "trim": true
         },
         "estado": {
             "type": "varchar",
-            "maxLength": 150,
+            "maxLength": 255,
             "trim": true
         },
         "pais": {

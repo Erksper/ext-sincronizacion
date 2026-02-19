@@ -38,36 +38,36 @@ class SincronizarDatosExternos implements JobDataLess
             ini_set('max_execution_time', 0);
             
             $this->log('info', 'Job', null, 'SincronizarDatosExternos', 'success', 
-                      'Job iniciado', null);
+                    'Job iniciado', null);
             
             $config = $this->getActiveConfig();
             if (!$config) {
                 $this->log('error', 'Config', null, 'SincronizarDatosExternos', 'error',
-                          'No hay configuración activa de BD externa', null);
+                        'No hay configuración activa de BD externa', null);
                 return;
             }
             
             $this->log('info', 'Config', $config['id'], $config['name'], 'success',
-                      "Usando configuración: {$config['name']}", $config['id']);
+                    "Usando configuración: {$config['name']}", $config['id']);
             
             $pdo = $this->connectToExternalDb($config);
             if (!$pdo) {
                 $this->log('error', 'Config', $config['id'], $config['name'], 'error',
-                          'No se pudo conectar a la BD externa', $config['id']);
+                        'No se pudo conectar a la BD externa', $config['id']);
                 $this->updateConfigStatus($config['id'], 'error');
                 return;
             }
             
             $sqlUsuarios = "SELECT id, idAfiliados, nombre, apellidoM, apellidoP, username, password, email, telMovil, puesto, fotoPath 
-                           FROM usuarios 
-                           WHERE isActive = 1 AND idAfiliados IS NOT NULL";
+                        FROM usuarios 
+                        WHERE isActive = 1 AND idAfiliados IS NOT NULL";
             $stmtUsuarios = $pdo->prepare($sqlUsuarios);
             $stmtUsuarios->execute();
             $usuariosExternos = $stmtUsuarios->fetchAll(PDO::FETCH_ASSOC);
             
             $sqlUsuariosInactivos = "SELECT id, idAfiliados, nombre, apellidoM, apellidoP, username, password, email, telMovil, puesto, fotoPath 
-                           FROM usuarios 
-                           WHERE isActive = 0 AND idAfiliados IS NOT NULL";
+                                FROM usuarios 
+                                WHERE isActive = 0 AND idAfiliados IS NOT NULL";
             $stmtUsuariosInactivos = $pdo->prepare($sqlUsuariosInactivos);
             $stmtUsuariosInactivos->execute();
             $usuariosInactivos = $stmtUsuariosInactivos->fetchAll(PDO::FETCH_ASSOC);
@@ -91,17 +91,15 @@ class SincronizarDatosExternos implements JobDataLess
             $pdo = null;
             
             $this->log('info', 'Datos', null, 'Consulta', 'success',
-                      "Usuarios activos: " . count($usuariosExternos) . 
-                      ", Inactivos: " . count($usuariosInactivos) . 
-                      ", Afiliados: " . count($afiliadosExternos) . 
-                      ", Roles: " . count($rolesExternos), $config['id']);
+                    "Usuarios activos: " . count($usuariosExternos) . 
+                    ", Inactivos: " . count($usuariosInactivos) . 
+                    ", Afiliados: " . count($afiliadosExternos) . 
+                    ", Roles: " . count($rolesExternos), $config['id']);
             
             $passwordHash = $this->injectableFactory->create(PasswordHash::class);
             $imageHandler = new ImageHandler($this->entityManager);
             $teamHandler = new TeamHandler($this->entityManager);
-            $teamHandler->setLogger($this); 
             $userHandler = new UserHandler($this->entityManager, $imageHandler, $teamHandler, $passwordHash);
-            $userHandler->setLogger($this); 
             
             $summary = [
                 'roles' => ['created' => 0, 'existing' => 0, 'errors' => 0],
@@ -147,7 +145,7 @@ class SincronizarDatosExternos implements JobDataLess
             );
             
             $this->log('info', 'Resumen', null, 'Sincronización Completa', $status,
-                      $resumenMsg, $config['id']);
+                    $resumenMsg, $config['id']);
             
         } catch (\Exception $e) {
             $errorMsg = 'Error crítico: ' . $e->getMessage();
@@ -155,11 +153,11 @@ class SincronizarDatosExternos implements JobDataLess
             
             if ($config) {
                 $this->log('error', 'Job', $config['id'], 'SincronizarDatosExternos', 'error',
-                          $errorMsg, $config['id']);
+                        $errorMsg, $config['id']);
                 $this->updateConfigStatus($config['id'], 'error');
             } else {
                 $this->log('error', 'Job', null, 'SincronizarDatosExternos', 'error',
-                          $errorMsg, null);
+                        $errorMsg, null);
             }
         }
     }
