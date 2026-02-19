@@ -1,5 +1,4 @@
 <?php
-
 namespace Espo\Modules\Sincronizacion\Hooks\ExternalDbConfig;
 
 use Espo\Core\Hook\Hook\BeforeSave as BeforeSaveHook;
@@ -17,39 +16,16 @@ class BeforeSave implements BeforeSaveHook
     
     public function beforeSave(Entity $entity, SaveOptions $options): void
     {
-        error_log('[Hook BeforeSave] Iniciando encriptación...');
-        error_log('[Hook BeforeSave] Entity ID: ' . ($entity->getId() ?? 'nuevo'));
-        
-        // Solo encriptar si el campo cambió
         foreach ($this->encryptedFields as $field) {
-            error_log("[Hook BeforeSave] Verificando campo: {$field}");
-            
-            if ($entity->has($field)) {
-                error_log("[Hook BeforeSave] Campo {$field} existe en entity");
+            if ($entity->has($field) && $entity->isAttributeChanged($field)) {
+                $value = $entity->get($field);
                 
-                if ($entity->isAttributeChanged($field)) {
-                    error_log("[Hook BeforeSave] Campo {$field} ha cambiado");
-                    
-                    $value = $entity->get($field);
-                    error_log("[Hook BeforeSave] Valor de {$field}: " . substr($value ?? '', 0, 10) . '...');
-                    
-                    if (!empty($value) && !$this->isEncrypted($value)) {
-                        error_log("[Hook BeforeSave] Encriptando campo {$field}");
-                        $encrypted = $this->encrypt($value);
-                        $entity->set($field, $encrypted);
-                        error_log("[Hook BeforeSave] Campo {$field} encriptado exitosamente");
-                    } else {
-                        error_log("[Hook BeforeSave] Campo {$field} ya está encriptado o está vacío");
-                    }
-                } else {
-                    error_log("[Hook BeforeSave] Campo {$field} NO ha cambiado");
+                if (!empty($value) && !$this->isEncrypted($value)) {
+                    $encrypted = $this->encrypt($value);
+                    $entity->set($field, $encrypted);
                 }
-            } else {
-                error_log("[Hook BeforeSave] Campo {$field} NO existe en entity");
             }
         }
-        
-        error_log('[Hook BeforeSave] Finalizado');
     }
     
     private function encrypt(string $value): string

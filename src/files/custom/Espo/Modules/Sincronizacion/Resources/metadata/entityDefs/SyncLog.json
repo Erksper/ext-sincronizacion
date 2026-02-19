@@ -40,13 +40,13 @@
     "action": {
       "type": "enum",
       "required": true,
-      "options": ["created", "updated", "disabled", "skipped", "error"],
+      "options": ["created", "updated", "disabled", "info", "error"],
       "readOnly": true,
       "style": {
         "created": "success",
         "updated": "info",
         "disabled": "warning",
-        "skipped": "default",
+        "info": "default",
         "error": "danger"
       },
       "default": "created"

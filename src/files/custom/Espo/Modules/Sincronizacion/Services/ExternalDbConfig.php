@@ -1,5 +1,4 @@
 <?php
-
 namespace Espo\Modules\Sincronizacion\Services;
 
 use Espo\Core\Exceptions\Forbidden;
@@ -15,10 +14,6 @@ class ExternalDbConfig extends Record
         parent::init();
     }
     
-    /**
-     * Solo administradores pueden ver/editar
-     * Los admins ven los datos DESENCRIPTADOS
-     */
     public function read(string $id, \Espo\Core\Record\ReadParams $params = null): Entity
     {
         if (!$this->user->isAdmin()) {
@@ -27,9 +22,8 @@ class ExternalDbConfig extends Record
         
         $entity = parent::read($id, $params ?? \Espo\Core\Record\ReadParams::create());
         
-        // Desencriptar campos para mostrar a admins
         foreach ($this->encryptedFields as $field) {
-            if ($field === 'password') continue; // Password se maneja diferente
+            if ($field === 'password') continue;
             
             $value = $entity->get($field);
             if (!empty($value) && $this->isEncrypted($value)) {
@@ -37,7 +31,6 @@ class ExternalDbConfig extends Record
                     $decrypted = $this->decrypt($value);
                     $entity->set($field, $decrypted);
                 } catch (\Exception $e) {
-                    // Si falla, dejar el valor encriptado
                 }
             }
         }
@@ -45,16 +38,12 @@ class ExternalDbConfig extends Record
         return $entity;
     }
     
-    /**
-     * Antes de crear: verificar permisos y encriptar
-     */
     public function create(\stdClass $data, \Espo\Core\Record\CreateParams $params = null): Entity
     {
         if (!$this->user->isAdmin()) {
             throw new Forbidden('Solo administradores pueden crear configuraciones de BD externa');
         }
         
-        // Si se está creando como activa, desactivar las demás
         if (isset($data->isActive) && $data->isActive) {
             $this->deactivateOthers();
         }
@@ -62,16 +51,12 @@ class ExternalDbConfig extends Record
         return parent::create($data, $params ?? \Espo\Core\Record\CreateParams::create());
     }
     
-    /**
-     * Antes de actualizar: verificar permisos
-     */
     public function update(string $id, \stdClass $data, \Espo\Core\Record\UpdateParams $params = null): Entity
     {
         if (!$this->user->isAdmin()) {
             throw new Forbidden('Solo administradores pueden modificar configuraciones de BD externa');
         }
         
-        // Si se está activando esta configuración, desactivar las demás
         if (isset($data->isActive) && $data->isActive) {
             $this->deactivateOthers($id);
         }
@@ -79,9 +64,6 @@ class ExternalDbConfig extends Record
         return parent::update($id, $data, $params ?? \Espo\Core\Record\UpdateParams::create());
     }
     
-    /**
-     * Desactiva todas las configuraciones excepto la indicada
-     */
     private function deactivateOthers(?string $exceptId = null): void
     {
         $query = $this->entityManager
@@ -100,10 +82,6 @@ class ExternalDbConfig extends Record
         }
     }
     
-    /**
-     * Obtiene configuración activa con datos desencriptados
-     * USO INTERNO SOLAMENTE (para el Job)
-     */
     public function getActiveConfigDecrypted(): ?array
     {
         $config = $this->entityManager
@@ -128,9 +106,6 @@ class ExternalDbConfig extends Record
         ];
     }
     
-    /**
-     * Encripta un valor
-     */
     private function encrypt(string $value): string
     {
         if (empty($value)) {
@@ -151,16 +126,12 @@ class ExternalDbConfig extends Record
         return base64_encode($iv . $encrypted);
     }
     
-    /**
-     * Desencripta un valor
-     */
     private function decrypt(string $encryptedValue): string
     {
         if (empty($encryptedValue)) {
             return '';
         }
         
-        // Si no está encriptado, devolverlo tal cual
         if (!$this->isEncrypted($encryptedValue)) {
             return $encryptedValue;
         }
@@ -186,9 +157,6 @@ class ExternalDbConfig extends Record
         }
     }
     
-    /**
-     * Verifica si un valor está encriptado
-     */
     private function isEncrypted(string $value): bool
     {
         if (empty($value) || strlen($value) < 24) {
@@ -199,9 +167,6 @@ class ExternalDbConfig extends Record
         return $decoded !== false && strlen($decoded) >= 16;
     }
     
-    /**
-     * Actualiza el estado de sincronización
-     */
     public function updateSyncStatus(string $configId, string $status): void
     {
         $config = $this->entityManager->getEntityById('ExternalDbConfig', $configId);

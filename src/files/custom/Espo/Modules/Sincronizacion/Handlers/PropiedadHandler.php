@@ -1,90 +1,49 @@
 <?php
-
 namespace Espo\Modules\Sincronizacion\Handlers;
 
 use Espo\ORM\EntityManager;
 use Espo\Modules\Sincronizacion\Utils\StringUtils;
+use Espo\Modules\Sincronizacion\Traits\Loggable;
 
-/**
- * Manejador de sincronización de propiedades
- * 
- * Sincroniza propiedades desde 21online a EspoCRM
- * - Sincronización incremental (últimos 12 meses) por defecto
- * - Sincronización completa el día 1 del mes antes de 13:00 o forzada
- * - Procesamiento en lotes de 1000 registros con pausas
- */
 class PropiedadHandler
 {
+    use Loggable;
+
     private EntityManager $entityManager;
-    private array $incidencias = [];
     
     public function __construct(EntityManager $entityManager)
     {
         $this->entityManager = $entityManager;
     }
     
-    /**
-     * Logging dual: error_log + EspoCRM Log global
-     */
-    private function logInfo(string $message): void
-    {
-        error_log($message);
-        if (isset($GLOBALS['log'])) {
-            $GLOBALS['log']->info($message);
-        }
-    }
-    
-    private function logError(string $message): void
-    {
-        error_log($message);
-        if (isset($GLOBALS['log'])) {
-            $GLOBALS['log']->error($message);
-        }
-    }
-    
-    /**
-     * Sincronizar propiedades con paginación
-     * 
-     * @param \PDO $pdo Conexión a BD externa
-     * @param string $syncType 'anual' o 'completa'
-     * @param string $configId ID de configuración
-     * @param array $summary Resumen de sincronización
-     */
     public function syncPropiedades(
         \PDO $pdo,
         string $syncType,
         string $configId,
         array &$summary
     ): void {
-        $this->logInfo('[PropiedadHandler] === Sincronizando Propiedades ===');
-        $this->logInfo("[PropiedadHandler] Tipo de sincronización: {$syncType}");
-        
-        // Determinar query según tipo
         $whereClause = '';
         if ($syncType === 'anual') {
             $whereClause = 'WHERE fechaModificacion >= DATE_SUB(NOW(), INTERVAL 12 MONTH)';
         }
         
-        // Obtener total de registros
         $sqlCount = "SELECT COUNT(*) as total FROM propiedades {$whereClause}";
         $stmtCount = $pdo->prepare($sqlCount);
         $stmtCount->execute();
         $totalRegistros = $stmtCount->fetch(\PDO::FETCH_ASSOC)['total'];
         
-        $this->logInfo("[PropiedadHandler] Total de registros a sincronizar: {$totalRegistros}");
-        
         if ($totalRegistros == 0) {
-            $this->logInfo('[PropiedadHandler] No hay registros para sincronizar');
+            $this->log('info', 'Propiedades', null, 'Sincronización', 'success',
+                      'No hay propiedades para sincronizar', $configId);
             return;
         }
         
-        // Configuración de paginación
         $pageSize = 1000;
         $totalPaginas = ceil($totalRegistros / $pageSize);
         
-        $this->logInfo("[PropiedadHandler] Procesando en {$totalPaginas} páginas de {$pageSize} registros");
+        $this->log('info', 'Propiedades', null, 'Sincronización', 'success',
+                  "Procesando {$totalRegistros} propiedades en {$totalPaginas} páginas", $configId);
         
-        // Query base
         $sqlBase = "SELECT 
             id, idAfiliados, fechaAlta, fechaModificacion,
             tipoOperacion, tipoPropiedad, subtipoPropiedad,
@@ -100,13 +59,10 @@ class PropiedadHandler
         
         $stmt = $pdo->prepare($sqlBase);
         
-        // Procesar cada página
         $procesadas = 0;
         
         for ($pagina = 0; $pagina < $totalPaginas; $pagina++) {
             $offset = $pagina * $pageSize;
-            
-            $this->logInfo("[PropiedadHandler] === Procesando página " . ($pagina + 1) . "/{$totalPaginas} (offset: {$offset}) ===");
             
             $stmt->bindValue(1, $pageSize, \PDO::PARAM_INT);
             $stmt->bindValue(2, $offset, \PDO::PARAM_INT);
@@ -114,80 +70,59 @@ class PropiedadHandler
             
             $propiedades = $stmt->fetchAll(\PDO::FETCH_ASSOC);
             
-            $this->logInfo("[PropiedadHandler] Registros obtenidos en esta página: " . count($propiedades));
+            if (($pagina + 1) % 5 == 0 || $pagina == 0 || $pagina == $totalPaginas - 1) {
+                $this->log('info', 'Propiedades', null, 'Progreso', 'success',
+                          "Página " . ($pagina + 1) . "/{$totalPaginas} - " .
+                          "Procesadas: {$procesadas}/{$totalRegistros}", $configId);
+            }
             
-            // Procesar cada propiedad
             foreach ($propiedades as $propiedadExterna) {
                 $procesadas++;
                 
                 try {
                     $this->syncPropiedad($propiedadExterna, $configId, $summary);
-                    
-                    if ($procesadas % 100 == 0) {
-                        $this->logInfo("[PropiedadHandler] Progreso: {$procesadas}/{$totalRegistros} propiedades procesadas");
-                    }
-                    
                 } catch (\Exception $e) {
                     $summary['propiedades']['errors']++;
                     $idProp = $propiedadExterna['id'] ?? 'Unknown';
-                    $mensaje = "Error sincronizando propiedad ID {$idProp}: " . $e->getMessage();
-                    error_log("[PropiedadHandler] ERROR: {$mensaje}");
-                    error_log("[PropiedadHandler] Stack trace: " . $e->getTraceAsString());
-                    $this->addIncidencia('sync_error', 'Propiedades', $idProp, $idProp, $mensaje);
-                    $this->addLog('error', 'Propiedades', $idProp, "Propiedad {$idProp}", 'error', $mensaje, $configId);
+                    
+                    $this->log('error', 'Propiedades', $idProp, "ID {$idProp}", 'error',
+                              "Error: " . $e->getMessage(), $configId);
                 }
             }
             
-            // Pausa entre páginas
             if ($pagina < $totalPaginas - 1) {
-                $this->logInfo("[PropiedadHandler] Página " . ($pagina + 1) . " completada. Pausa de 2 segundos...");
                 sleep(2);
             }
         }
         
-        $this->logInfo('[PropiedadHandler] ========================================');
-        $this->logInfo('[PropiedadHandler] RESUMEN DE SINCRONIZACIÓN DE PROPIEDADES:');
-        $this->logInfo('[PropiedadHandler] - Total registros: ' . $totalRegistros);
-        $this->logInfo('[PropiedadHandler] - Procesadas: ' . $procesadas);
-        $this->logInfo('[PropiedadHandler] - Creadas: ' . ($summary['propiedades']['created'] ?? 0));
-        $this->logInfo('[PropiedadHandler] - Actualizadas: ' . ($summary['propiedades']['updated'] ?? 0));
-        $this->logInfo('[PropiedadHandler] - Sin cambios: ' . ($summary['propiedades']['no_changes'] ?? 0));
-        $this->logInfo('[PropiedadHandler] - Omitidas: ' . ($summary['propiedades']['skipped'] ?? 0));
-        $this->logInfo('[PropiedadHandler] - Errores: ' . ($summary['propiedades']['errors'] ?? 0));
-        $this->logInfo('[PropiedadHandler] ========================================');
+        $this->log('info', 'Propiedades', null, 'Resumen Final', 'success',
+                  "Creadas: {$summary['propiedades']['created']} | " .
+                  "Actualizadas: {$summary['propiedades']['updated']} | " .
+                  "Sin cambios: {$summary['propiedades']['no_changes']} | " .
+                  "Omitidas: {$summary['propiedades']['skipped']} | " .
+                  "Errores: {$summary['propiedades']['errors']}", $configId);
     }
     
-    /**
-     * Sincronizar una propiedad individual
-     */
     private function syncPropiedad(
         array $propiedadExterna,
         string $configId,
         array &$summary
     ): void {
-        // Validar campos obligatorios
-        if (!$this->validatePropiedadData($propiedadExterna, $summary)) {
+        if (!$this->validatePropiedadData($propiedadExterna, $summary, $configId)) {
             return;
         }
         
         $propiedadId = (string)$propiedadExterna['id'];
-        
-        // Buscar propiedad existente por ID
         $propiedad = $this->entityManager->getEntityById('Propiedades', $propiedadId);
         
         if (!$propiedad) {
-            // Crear nueva propiedad
             $this->createPropiedad($propiedadExterna, $propiedadId, $configId, $summary);
         } else {
-            // Actualizar propiedad existente
             $this->updatePropiedad($propiedad, $propiedadExterna, $configId, $summary);
         }
     }
     
-    /**
-     * Validar datos obligatorios de la propiedad
-     */
-    private function validatePropiedadData(array $propiedadExterna, array &$summary): bool
+    private function validatePropiedadData(array $propiedadExterna, array &$summary, string $configId): bool
     {
         $camposObligatorios = [
             'id' => 'ID',
@@ -204,10 +139,10 @@ class PropiedadHandler
         foreach ($camposObligatorios as $campo => $nombre) {
             if (empty($propiedadExterna[$campo])) {
                 $id = $propiedadExterna['id'] ?? 'Unknown';
-                $this->addIncidencia('validation_error', 'Propiedades', $id, $id,
-                                   "Propiedad ID {$id} sin campo obligatorio: {$nombre}");
                 $summary['propiedades']['skipped']++;
-                error_log("[PropiedadHandler] ✗ Propiedad ID {$id} RECHAZADA: falta campo '{$nombre}'");
+                
+                $this->log('info', 'Propiedades', $id, "ID {$id}", 'warning',
+                          "Propiedad omitida: falta campo '{$nombre}'", $configId);
                 return false;
             }
         }
@@ -215,9 +150,6 @@ class PropiedadHandler
         return true;
     }
     
-    /**
-     * Crear nueva propiedad
-     */
     private function createPropiedad(
         array $propiedadExterna,
         string $propiedadId,
@@ -239,21 +171,18 @@ class PropiedadHandler
             $this->entityManager->saveEntity($propiedad);
             
             $summary['propiedades']['created']++;
-            $this->addLog('created', 'Propiedades', $propiedadId, $propiedadData['name'], 'success',
-                         "Propiedad creada", $configId);
             
-            error_log("[PropiedadHandler] ✓ Propiedad creada: ID {$propiedadId}");
+            $this->log('created', 'Propiedades', $propiedadId, $propiedadData['name'], 'success',
+                      "Propiedad creada", $configId);
             
         } catch (\Exception $e) {
-            $this->logError("[PropiedadHandler] ERROR al crear propiedad ID {$propiedadId}: " . $e->getMessage());
             $summary['propiedades']['errors']++;
+            $this->log('error', 'Propiedades', $propiedadId, "ID {$propiedadId}", 'error',
+                      "Error al crear: " . $e->getMessage(), $configId);
             throw $e;
         }
     }
     
-    /**
-     * Actualizar propiedad existente
-     */
     private function updatePropiedad(
         $propiedad,
         array $propiedadExterna,
@@ -269,11 +198,8 @@ class PropiedadHandler
         $changes = [];
         $needsUpdate = false;
         
-        // Comparar cada campo
         foreach ($propiedadData as $field => $newValue) {
             $currentValue = $propiedad->get($field);
-            
-            // Normalizar para comparación
             $normalizedCurrent = StringUtils::normalize($currentValue);
             $normalizedNew = StringUtils::normalize($newValue);
             
@@ -284,19 +210,20 @@ class PropiedadHandler
             }
         }
         
-        // Guardar si hay cambios
         if ($needsUpdate) {
             try {
                 $this->entityManager->saveEntity($propiedad);
                 
                 $summary['propiedades']['updated']++;
                 $changesStr = implode(', ', $changes);
-                $this->addLog('updated', 'Propiedades', $propiedad->getId(), $propiedadData['name'], 'success',
-                             "Propiedad actualizada: {$changesStr}", $configId);
+                
+                $this->log('updated', 'Propiedades', $propiedad->getId(), $propiedadData['name'], 'success',
+                          "Propiedad actualizada: {$changesStr}", $configId);
                 
             } catch (\Exception $e) {
-                $this->logError("[PropiedadHandler] ERROR al actualizar propiedad: " . $e->getMessage());
                 $summary['propiedades']['errors']++;
+                $this->log('error', 'Propiedades', $propiedad->getId(), $propiedadData['name'], 'error',
+                          "Error al actualizar: " . $e->getMessage(), $configId);
                 throw $e;
             }
         } else {
@@ -304,24 +231,17 @@ class PropiedadHandler
         }
     }
     
-    /**
-     * Preparar datos de propiedad formateados
-     */
     private function preparePropiedadData(array $propiedadExterna): ?array
     {
-        // Generar name usando Opción C: "{tipoOperacion} - {tipoPropiedad} - {urbanizacion}"
         $tipoOperacion = $propiedadExterna['tipoOperacion'] ?? 'N/A';
         $tipoPropiedad = $propiedadExterna['tipoPropiedad'] ?? 'N/A';
         $urbanizacion = $propiedadExterna['colonia2'] ?? $propiedadExterna['colonia'] ?? 'Sin especificar';
-        
         $name = "{$tipoOperacion} - {$tipoPropiedad} - {$urbanizacion}";
         
-        // Fecha de alta: usar de BD o generar
         $fechaAlta = !empty($propiedadExterna['fechaAlta']) 
             ? $propiedadExterna['fechaAlta']
             : date('Y-m-d H:i:s');
         
-        // Datos base (siempre presentes)
         $data = [
             'name' => $name,
             'idOficinaId' => (string)$propiedadExterna['idAfiliados'],
@@ -335,7 +255,6 @@ class PropiedadHandler
             'assignedUserId' => (string)$propiedadExterna['idAsesorExclusiva']
         ];
         
-        // Campos opcionales
         $camposOpcionales = [
             'fechaModificacion' => 'fechaModificacion',
             'comision' => 'comision',
@@ -343,9 +262,9 @@ class PropiedadHandler
             'monedaEnContrato' => 'monedaEnContrato',
             'calle' => 'calle',
             'numero' => 'numero',
-            'municipio' => 'colonia',      // Mapeo: municipio ← colonia
-            'urbanizacion' => 'colonia2',  // Mapeo: urbanizacion ← colonia2
-            'ciudad' => 'municipio',       // Mapeo: ciudad ← municipio
+            'municipio' => 'colonia',
+            'urbanizacion' => 'colonia2',
+            'ciudad' => 'municipio',
             'estado' => 'estado',
             'pais' => 'pais',
             'precioVenta' => 'precioVenta',
@@ -365,56 +284,5 @@ class PropiedadHandler
         }
         
         return $data;
-    }
-    
-    /**
-     * Agregar incidencia
-     */
-    private function addIncidencia(string $tipo, string $entityType, ?string $entityId, string $entityName, string $mensaje): void
-    {
-        $this->incidencias[] = [
-            'tipo' => $tipo,
-            'entityType' => $entityType,
-            'entityId' => $entityId,
-            'entityName' => $entityName,
-            'mensaje' => $mensaje
-        ];
-    }
-    
-    /**
-     * Obtener incidencias acumuladas
-     */
-    public function getIncidencias(): array
-    {
-        return $this->incidencias;
-    }
-    
-    /**
-     * Agregar log de sincronización
-     */
-    private function addLog(string $action, string $entityType, ?string $entityId, string $entityName,
-                           string $status, string $message, ?string $configId = null): void
-    {
-        try {
-            $log = $this->entityManager->getNewEntity('SyncLog');
-            $log->set([
-                'name' => "{$entityType}: {$entityName}",
-                'syncDate' => date('Y-m-d H:i:s'),
-                'entityType' => $entityType,
-                'entityId' => $entityId,
-                'entityName' => $entityName,
-                'action' => $action,
-                'status' => $status,
-                'message' => $message
-            ]);
-            
-            if ($configId) {
-                $log->set('configId', $configId);
-            }
-            
-            $this->entityManager->saveEntity($log);
-        } catch (\Exception $e) {
-            error_log('[PropiedadHandler] Error creando log: ' . $e->getMessage());
-        }
     }
 }

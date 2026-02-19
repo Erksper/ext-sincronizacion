@@ -1,5 +1,4 @@
 <?php
-
 namespace Espo\Modules\Sincronizacion\Controllers;
 
 use Espo\Core\Controllers\Record;
@@ -9,10 +8,6 @@ use Espo\Core\Exceptions\BadRequest;
 
 class ExternalDbConfig extends Record
 {
-    /**
-     * POST ExternalDbConfig/action/runSync
-     * Ejecuta la sincronización manualmente
-     */
     public function postActionRunSync(Request $request): array
     {
         if (!$this->user->isAdmin()) {
@@ -26,10 +21,8 @@ class ExternalDbConfig extends Record
         }
         
         try {
-            // Crear instancia del Job y ejecutarlo
             $job = $this->injectableFactory->create('Espo\\Modules\\Sincronizacion\\Jobs\\SincronizarDatosExternos');
             
-            // Ejecutar en el mismo proceso (sin cron)
             ob_start();
             $job->run();
             $output = ob_get_clean();
@@ -46,10 +39,6 @@ class ExternalDbConfig extends Record
         }
     }
     
-    /**
-     * POST ExternalDbConfig/action/testConnection
-     * Prueba la conexión a la BD externa
-     */
     public function postActionTestConnection(Request $request): array
     {
         if (!$this->user->isAdmin()) {
@@ -73,7 +62,6 @@ class ExternalDbConfig extends Record
                 ];
             }
             
-            // Intentar conectar
             $pdo = new \PDO(
                 "mysql:host={$config['host']};port={$config['port']};dbname={$config['database']};charset=utf8mb4",
                 $config['username'],
@@ -84,7 +72,6 @@ class ExternalDbConfig extends Record
                 ]
             );
             
-            // Contar usuarios
             $stmt = $pdo->query("SELECT COUNT(*) as total FROM usuarios WHERE isActive = 1");
             $result = $stmt->fetch(\PDO::FETCH_ASSOC);
             

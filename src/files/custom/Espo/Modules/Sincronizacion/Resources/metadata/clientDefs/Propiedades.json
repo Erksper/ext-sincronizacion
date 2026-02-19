@@ -1,0 +1,30 @@
+{
+    "controller": "record",
+    "iconClass": "fas fa-building",
+    "color": "#4CAF50",
+    "kanbanViewMode": true,
+    "kanbanStatusIgnoreList": [],
+    "boolFilterList": ["onlyMy"],
+    "filterList": ["all", "active"],
+    "modalDetailView": false,
+    "sidePanels": {
+        "detail": [
+            {
+                "name": "stream",
+                "label": "Stream",
+                "view": "views/stream/panel",
+                "isForm": true,
+                "order": 5
+            }
+        ],
+        "edit": [
+            {
+                "name": "stream",
+                "label": "Stream",
+                "view": "views/stream/panel",
+                "isForm": true,
+                "order": 5
+            }
+        ]
+    }
+}

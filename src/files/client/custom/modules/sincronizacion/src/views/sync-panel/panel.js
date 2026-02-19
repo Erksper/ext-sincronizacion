@@ -11,7 +11,8 @@ define('sincronizacion:views/sync-panel/panel', ['view'], function (Dep) {
         data: function () {
             return {
                 testResult: this.testResult,
-                syncResult: this.syncResult
+                syncResult: this.syncResult,
+                propiedadesResult: this.propiedadesResult
             };
         },
 
@@ -23,6 +24,14 @@ define('sincronizacion:views/sync-panel/panel', ['view'], function (Dep) {
             'click [data-action="runSync"]': function (e) {
                 e.preventDefault();
                 this.actionRunSync();
+            },
+            'click [data-action="syncPropiedadesAnual"]': function (e) {
+                e.preventDefault();
+                this.actionSyncPropiedades('anual');
+            },
+            'click [data-action="syncPropiedadesCompleta"]': function (e) {
+                e.preventDefault();
+                this.actionSyncPropiedades('completa');
             }
         },
 
@@ -68,11 +77,11 @@ define('sincronizacion:views/sync-panel/panel', ['view'], function (Dep) {
         },
 
         actionRunSync: function () {
-            this.confirm('¿Ejecutar sincronización ahora?', function () {
+            this.confirm('¿Ejecutar sincronización de usuarios y equipos ahora?', function () {
                 var $btn = this.$el.find('[data-action="runSync"]');
                 $btn.prop('disabled', true);
                 
-                Espo.Ui.notify('Ejecutando sincronización...', 'info');
+                Espo.Ui.notify('Ejecutando sincronización de usuarios...', 'info');
 
                 Espo.Ajax
                     .postRequest('SyncPanel/action/runSync')
@@ -83,14 +92,16 @@ define('sincronizacion:views/sync-panel/panel', ['view'], function (Dep) {
                             this.syncResult = {
                                 success: true,
                                 message: response.message,
-                                timestamp: new Date().toLocaleString()
+                                timestamp: new Date().toLocaleString(),
+                                details: response.details || null
                             };
                             Espo.Ui.success(response.message);
                         } else {
                             this.syncResult = {
                                 success: false,
                                 message: response.message,
-                                timestamp: new Date().toLocaleString()
+                                timestamp: new Date().toLocaleString(),
+                                details: response.details || null
                             };
                             Espo.Ui.error(response.message);
                         }
@@ -105,6 +116,73 @@ define('sincronizacion:views/sync-panel/panel', ['view'], function (Dep) {
                         }
                         Espo.Ui.error(errorMsg);
                         console.error('Error runSync:', xhr);
+                    }.bind(this));
+            }.bind(this));
+        },
+
+        actionSyncPropiedades: function (tipo) {
+            var mensaje = tipo === 'anual' 
+                ? '¿Sincronizar propiedades de los últimos 12 meses?' 
+                : '¿Sincronizar TODAS las propiedades? (Puede tardar varios minutos)';
+            
+            var tipoTexto = tipo === 'anual' ? 'Anual (12 meses)' : 'Completa';
+            
+            this.confirm(mensaje, function () {
+                var $btn = this.$el.find('[data-action="syncPropiedades' + 
+                    (tipo === 'anual' ? 'Anual' : 'Completa') + '"]');
+                $btn.prop('disabled', true);
+                
+                Espo.Ui.notify('Sincronizando propiedades (' + tipo + ')... Esto puede tardar varios minutos.', 'info', 0);
+
+                Espo.Ajax
+                    .postRequest('SyncPanel/action/syncPropiedades', {
+                        tipo: tipo
+                    })
+                    .then(function (response) {
+                        $btn.prop('disabled', false);
+                        Espo.Ui.notify(false);
+                        
+                        if (response.success) {
+                            this.propiedadesResult = {
+                                success: true,
+                                tipo: tipoTexto,
+                                message: response.message,
+                                timestamp: new Date().toLocaleString(),
+                                details: response.details || null
+                            };
+                            Espo.Ui.success(response.message);
+                        } else {
+                            this.propiedadesResult = {
+                                success: false,
+                                tipo: tipoTexto,
+                                message: response.message,
+                                timestamp: new Date().toLocaleString(),
+                                details: response.details || null
+                            };
+                            Espo.Ui.error(response.message);
+                        }
+                        
+                        this.reRender();
+                    }.bind(this))
+                    .catch(function (xhr) {
+                        $btn.prop('disabled', false);
+                        Espo.Ui.notify(false);
+                        
+                        var errorMsg = 'Error sincronizando propiedades';
+                        if (xhr.responseJSON && xhr.responseJSON.message) {
+                            errorMsg = xhr.responseJSON.message;
+                        }
+                        
+                        this.propiedadesResult = {
+                            success: false,
+                            tipo: tipoTexto,
+                            message: errorMsg,
+                            timestamp: new Date().toLocaleString()
+                        };
+                        
+                        Espo.Ui.error(errorMsg);
+                        console.error('Error syncPropiedades:', xhr);
+                        this.reRender();
                     }.bind(this));
             }.bind(this));
         }

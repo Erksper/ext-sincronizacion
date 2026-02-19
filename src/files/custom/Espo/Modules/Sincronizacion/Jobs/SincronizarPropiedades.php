@@ -1,224 +1,293 @@
 <?php
+namespace Espo\Modules\Sincronizacion\Handlers;
 
-namespace Espo\Modules\Sincronizacion\Jobs;
-
-use Espo\Core\Job\JobDataLess;
-use Espo\Core\InjectableFactory;
 use Espo\ORM\EntityManager;
-use PDO;
-use PDOException;
+use Espo\Modules\Sincronizacion\Utils\StringUtils;
+use Espo\Modules\Sincronizacion\Traits\Loggable;
 
-/**
- * Job programado para sincronizar propiedades desde 21online
- * 
- * - Sincronización incremental (últimos 12 meses) por defecto
- * - Sincronización completa el día 1 del mes antes de 13:00
- * - Procesamiento paginado de 1000 registros por página
- */
-class SincronizarPropiedades implements JobDataLess
+class PropiedadHandler
 {
-    private EntityManager $entityManager;
-    private InjectableFactory $injectableFactory;
-    
-    public function __construct(
-        EntityManager $entityManager,
-        InjectableFactory $injectableFactory
-    ) {
-        $this->entityManager = $entityManager;
-        $this->injectableFactory = $injectableFactory;
-    }
+    use Loggable;
 
-    public function run(): void
+    private EntityManager $entityManager;
+    
+    public function __construct(EntityManager $entityManager)
     {
-        try {
-            // Configuración de límites
-            set_time_limit(0);
-            ini_set('memory_limit', '1024M');
-            ini_set('max_execution_time', 0);
-            
-            error_log('[SyncPropiedades] ========== INICIANDO SINCRONIZACIÓN DE PROPIEDADES ==========');
-            
-            // 1. Obtener configuración activa
-            $config = $this->getActiveConfig();
-            if (!$config) {
-                error_log('[SyncPropiedades] No hay configuración activa de BD externa');
-                return;
-            }
-            
-            error_log("[SyncPropiedades] Usando configuración: {$config['name']}");
-            
-            // 2. Conectar a la base de datos externa
-            $pdo = $this->connectToExternalDb($config);
-            if (!$pdo) {
-                $this->updateConfigStatus($config['id'], 'error');
-                error_log('[SyncPropiedades] No se pudo conectar a la BD externa');
-                return;
-            }
-            
-            // 3. Determinar tipo de sincronización
-            $syncType = $this->determineSyncType();
-            
-            // 4. Inicializar resumen
-            $summary = [
-                'propiedades' => [
-                    'created' => 0,
-                    'updated' => 0,
-                    'no_changes' => 0,
-                    'skipped' => 0,
-                    'errors' => 0
-                ]
-            ];
-            
-            // 5. Sincronizar propiedades
-            $propiedadHandler = $this->injectableFactory->create('Espo\\Modules\\Sincronizacion\\Handlers\\PropiedadHandler');
-            $propiedadHandler->syncPropiedades($pdo, $syncType, $config['id'], $summary);
-            
-            // 6. Cerrar conexión
-            $pdo = null;
-            
-            // 7. Actualizar estado
-            $this->updateConfigStatus($config['id'], 'success');
-            
-            // 8. Guardar incidencias
-            $this->saveIncidencias($propiedadHandler->getIncidencias(), $config['id']);
-            
-            error_log('[SyncPropiedades] ========== SINCRONIZACIÓN COMPLETADA ==========');
-            
-        } catch (\Exception $e) {
-            error_log('[SyncPropiedades] ERROR CRÍTICO: ' . $e->getMessage());
-            error_log('[SyncPropiedades] Stack trace: ' . $e->getTraceAsString());
-            
-            if (isset($config)) {
-                $this->updateConfigStatus($config['id'], 'error');
-            }
-        }
+        $this->entityManager = $entityManager;
     }
     
-    /**
-     * Determinar tipo de sincronización
-     * 
-     * @return string 'completa' o 'anual'
-     */
-    private function determineSyncType(): string
-    {
-        // Verificar si se fuerza un tipo específico (desde panel manual)
-        $forcedType = getenv('FORCE_SYNC_TYPE');
-        if ($forcedType === 'completa' || $forcedType === 'anual') {
-            error_log("[SyncPropiedades] Tipo FORZADO desde panel: {$forcedType}");
-            return $forcedType;
+    public function syncPropiedades(
+        \PDO $pdo,
+        string $syncType,
+        string $configId,
+        array &$summary
+    ): void {
+        $startTime = microtime(true); 
+        
+        $whereClause = '';
+        if ($syncType === 'anual') {
+            $whereClause = 'WHERE fechaModificacion >= DATE_SUB(NOW(), INTERVAL 12 MONTH)';
         }
         
-        $dia = (int)date('j');
-        $hora = (int)date('G');
+        $sqlCount = "SELECT COUNT(*) as total FROM propiedades {$whereClause}";
+        $stmtCount = $pdo->prepare($sqlCount);
+        $stmtCount->execute();
+        $totalRegistros = $stmtCount->fetch(\PDO::FETCH_ASSOC)['total'];
         
-        // Día 1 del mes y hora < 13:00 → sincronización completa
-        if ($dia === 1 && $hora < 13) {
-            error_log('[SyncPropiedades] Sincronización COMPLETA (día 1 del mes antes de 13:00)');
-            return 'completa';
+        if ($totalRegistros == 0) {
+            $this->log('info', 'Propiedades', null, 'Sincronización', 'success',
+                      'No hay propiedades para sincronizar', $configId);
+            return;
         }
         
-        // Otros días → sincronización anual (últimos 12 meses)
-        error_log('[SyncPropiedades] Sincronización ANUAL (últimos 12 meses)');
-        return 'anual';
-    }
-    
-    /**
-     * Obtener configuración activa
-     */
-    private function getActiveConfig(): ?array
-    {
-        try {
-            $config = $this->entityManager->getRDBRepository('SyncConfig')
-                ->where(['isActive' => true])
-                ->findOne();
+        $pageSize = 1000;
+        $totalPaginas = ceil($totalRegistros / $pageSize);
+        
+        $this->log('info', 'Propiedades', null, 'Sincronización', 'success',
+                  "Procesando {$totalRegistros} propiedades en {$totalPaginas} páginas", $configId);
+        
+        $sqlBase = "SELECT 
+            id, idAfiliados, fechaAlta, fechaModificacion,
+            tipoOperacion, tipoPropiedad, subtipoPropiedad,
+            tipoDeContrato, status, idAsesorExclusiva,
+            comision, precioEnContrato, monedaEnContrato,
+            calle, numero, colonia, colonia2, municipio, estado, pais,
+            precioVenta, precioRenta, infoExtraPrecio, moneda,
+            enInternet, m2T, m2C, edad
+        FROM propiedades
+        {$whereClause}
+        ORDER BY id
+        LIMIT ? OFFSET ?";
+        
+        $stmt = $pdo->prepare($sqlBase);
+        
+        $procesadas = 0;
+        
+        for ($pagina = 0; $pagina < $totalPaginas; $pagina++) {
+            $offset = $pagina * $pageSize;
             
-            if (!$config) {
-                return null;
+            $stmt->bindValue(1, $pageSize, \PDO::PARAM_INT);
+            $stmt->bindValue(2, $offset, \PDO::PARAM_INT);
+            $stmt->execute();
+            
+            $propiedades = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+            
+            if (($pagina + 1) % 5 == 0 || $pagina == 0 || $pagina == $totalPaginas - 1) {
+                $this->log('info', 'Propiedades', null, 'Progreso', 'success',
+                          "Página " . ($pagina + 1) . "/{$totalPaginas} - " .
+                          "Procesadas: {$procesadas}/{$totalRegistros}", $configId);
             }
             
-            return [
-                'id' => $config->getId(),
-                'name' => $config->get('name'),
-                'host' => $config->get('dbHost'),
-                'port' => $config->get('dbPort'),
-                'database' => $config->get('dbName'),
-                'username' => $config->get('dbUser'),
-                'password' => $config->get('dbPassword')
-            ];
-        } catch (\Exception $e) {
-            error_log('[SyncPropiedades] Error obteniendo configuración: ' . $e->getMessage());
-            return null;
-        }
-    }
-    
-    /**
-     * Conectar a la base de datos externa
-     */
-    private function connectToExternalDb(array $config): ?PDO
-    {
-        try {
-            $dsn = "mysql:host={$config['host']};port={$config['port']};dbname={$config['database']};charset=utf8mb4";
-            
-            $pdo = new PDO(
-                $dsn,
-                $config['username'],
-                $config['password'],
-                [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                    PDO::ATTR_EMULATE_PREPARES => false
-                ]
-            );
-            
-            error_log('[SyncPropiedades] Conexión a BD externa establecida exitosamente');
-            return $pdo;
-            
-        } catch (PDOException $e) {
-            error_log('[SyncPropiedades] Error conectando a BD externa: ' . $e->getMessage());
-            return null;
-        }
-    }
-    
-    /**
-     * Actualizar estado de la configuración
-     */
-    private function updateConfigStatus(string $configId, string $status): void
-    {
-        try {
-            $config = $this->entityManager->getEntityById('SyncConfig', $configId);
-            if ($config) {
-                $config->set('lastSyncDate', date('Y-m-d H:i:s'));
-                $config->set('lastSyncStatus', $status);
-                $this->entityManager->saveEntity($config);
-            }
-        } catch (\Exception $e) {
-            error_log('[SyncPropiedades] Error actualizando estado: ' . $e->getMessage());
-        }
-    }
-    
-    /**
-     * Guardar incidencias
-     */
-    private function saveIncidencias(array $incidencias, string $configId): void
-    {
-        error_log('[SyncPropiedades] Guardando ' . count($incidencias) . ' incidencias...');
-        
-        foreach ($incidencias as $incidencia) {
-            try {
-                $entity = $this->entityManager->getNewEntity('SyncIncidencia');
-                $entity->set([
-                    'tipo' => $incidencia['tipo'],
-                    'entityType' => $incidencia['entityType'],
-                    'entityId' => $incidencia['entityId'],
-                    'entityName' => $incidencia['entityName'],
-                    'mensaje' => $incidencia['mensaje'],
-                    'configId' => $configId
-                ]);
+            foreach ($propiedades as $propiedadExterna) {
+                $procesadas++;
                 
-                $this->entityManager->saveEntity($entity);
-            } catch (\Exception $e) {
-                error_log('[SyncPropiedades] Error guardando incidencia: ' . $e->getMessage());
+                try {
+                    $this->syncPropiedad($propiedadExterna, $configId, $summary);
+                } catch (\Exception $e) {
+                    $summary['propiedades']['errors']++;
+                    $idProp = $propiedadExterna['id'] ?? 'Unknown';
+                    
+                    $this->log('error', 'Propiedades', $idProp, "ID {$idProp}", 'error',
+                              "Error: " . $e->getMessage(), $configId);
+                }
+            }
+            
+            if ($pagina < $totalPaginas - 1) {
+                sleep(2);
             }
         }
+        
+        $elapsed = round(microtime(true) - $startTime, 2); 
+        
+        $this->log('info', 'Propiedades', null, 'Resumen Final', 'success', 
+                  "Creadas: {$summary['propiedades']['created']} | " .
+                  "Actualizadas: {$summary['propiedades']['updated']} | " .
+                  "Sin cambios: {$summary['propiedades']['no_changes']} | " .
+                  "Omitidas: {$summary['propiedades']['skipped']} | " .
+                  "Errores: {$summary['propiedades']['errors']} | " .
+                  "Tiempo: {$elapsed}s", $configId); 
+    }
+    
+    private function syncPropiedad(
+        array $propiedadExterna,
+        string $configId,
+        array &$summary
+    ): void {
+        if (!$this->validatePropiedadData($propiedadExterna, $summary, $configId)) {
+            return;
+        }
+        
+        $propiedadId = (string)$propiedadExterna['id'];
+        $propiedad = $this->entityManager->getEntityById('Propiedades', $propiedadId);
+        
+        if (!$propiedad) {
+            $this->createPropiedad($propiedadExterna, $propiedadId, $configId, $summary);
+        } else {
+            $this->updatePropiedad($propiedad, $propiedadExterna, $configId, $summary);
+        }
+    }
+    
+    private function validatePropiedadData(array $propiedadExterna, array &$summary, string $configId): bool
+    {
+        $camposObligatorios = [
+            'id' => 'ID',
+            'idAfiliados' => 'Oficina (idAfiliados)',
+            'fechaAlta' => 'Fecha de Alta',
+            'tipoOperacion' => 'Tipo de Operación',
+            'tipoPropiedad' => 'Tipo de Propiedad',
+            'subtipoPropiedad' => 'Subtipo de Propiedad',
+            'tipoDeContrato' => 'Tipo de Contrato',
+            'status' => 'Estado',
+            'idAsesorExclusiva' => 'Asesor Exclusiva'
+        ];
+        
+        foreach ($camposObligatorios as $campo => $nombre) {
+            if (empty($propiedadExterna[$campo])) {
+                $id = $propiedadExterna['id'] ?? 'Unknown';
+                $summary['propiedades']['skipped']++;
+                
+                $this->log('info', 'Propiedades', $id, "ID {$id}", 'warning',
+                          "Propiedad omitida: falta campo '{$nombre}'", $configId);
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+    private function createPropiedad(
+        array $propiedadExterna,
+        string $propiedadId,
+        string $configId,
+        array &$summary
+    ): void {
+        $propiedadData = $this->preparePropiedadData($propiedadExterna);
+        
+        if (!$propiedadData) {
+            $summary['propiedades']['skipped']++;
+            return;
+        }
+        
+        try {
+            $propiedad = $this->entityManager->getNewEntity('Propiedades');
+            $propiedad->set('id', $propiedadId);
+            $propiedad->set($propiedadData);
+            
+            $this->entityManager->saveEntity($propiedad);
+            
+            $summary['propiedades']['created']++;
+            
+            $this->log('created', 'Propiedades', $propiedadId, $propiedadData['name'], 'success',
+                      "Propiedad creada", $configId);
+            
+        } catch (\Exception $e) {
+            $summary['propiedades']['errors']++;
+            $this->log('error', 'Propiedades', $propiedadId, "ID {$propiedadId}", 'error',
+                      "Error al crear: " . $e->getMessage(), $configId);
+            throw $e;
+        }
+    }
+    
+    private function updatePropiedad(
+        $propiedad,
+        array $propiedadExterna,
+        string $configId,
+        array &$summary
+    ): void {
+        $propiedadData = $this->preparePropiedadData($propiedadExterna);
+        
+        if (!$propiedadData) {
+            return;
+        }
+        
+        $changes = [];
+        $needsUpdate = false;
+        
+        foreach ($propiedadData as $field => $newValue) {
+            $currentValue = $propiedad->get($field);
+            $normalizedCurrent = StringUtils::normalize($currentValue);
+            $normalizedNew = StringUtils::normalize($newValue);
+            
+            if ($normalizedCurrent !== $normalizedNew) {
+                $propiedad->set($field, $newValue);
+                $needsUpdate = true;
+                $changes[] = $field;
+            }
+        }
+        
+        if ($needsUpdate) {
+            try {
+                $this->entityManager->saveEntity($propiedad);
+                
+                $summary['propiedades']['updated']++;
+                $changesStr = implode(', ', $changes);
+                
+                $this->log('updated', 'Propiedades', $propiedad->getId(), $propiedadData['name'], 'success',
+                          "Propiedad actualizada: {$changesStr}", $configId);
+                
+            } catch (\Exception $e) {
+                $summary['propiedades']['errors']++;
+                $this->log('error', 'Propiedades', $propiedad->getId(), $propiedadData['name'], 'error',
+                          "Error al actualizar: " . $e->getMessage(), $configId);
+                throw $e;
+            }
+        } else {
+            $summary['propiedades']['no_changes']++;
+        }
+    }
+    
+    private function preparePropiedadData(array $propiedadExterna): ?array
+    {
+        $tipoOperacion = $propiedadExterna['tipoOperacion'] ?? 'N/A';
+        $tipoPropiedad = $propiedadExterna['tipoPropiedad'] ?? 'N/A';
+        $urbanizacion = $propiedadExterna['colonia2'] ?? $propiedadExterna['colonia'] ?? 'Sin especificar';
+        $name = "{$tipoOperacion} - {$tipoPropiedad} - {$urbanizacion}";
+        
+        $fechaAlta = !empty($propiedadExterna['fechaAlta']) 
+            ? $propiedadExterna['fechaAlta']
+            : date('Y-m-d H:i:s');
+        
+        $data = [
+            'name' => $name,
+            'idOficinaId' => (string)$propiedadExterna['idAfiliados'],
+            'fechaAlta' => $fechaAlta,
+            'tipoOperacion' => $propiedadExterna['tipoOperacion'],
+            'tipoPropiedad' => $propiedadExterna['tipoPropiedad'],
+            'subTipoPropiedad' => $propiedadExterna['subtipoPropiedad'],
+            'tipoDeContrato' => $propiedadExterna['tipoDeContrato'],
+            'status' => $propiedadExterna['status'],
+            'idAsesorExclusivaId' => (string)$propiedadExterna['idAsesorExclusiva'],
+            'assignedUserId' => (string)$propiedadExterna['idAsesorExclusiva']
+        ];
+        
+        $camposOpcionales = [
+            'fechaModificacion' => 'fechaModificacion',
+            'comision' => 'comision',
+            'precioEnContrato' => 'precioEnContrato',
+            'monedaEnContrato' => 'monedaEnContrato',
+            'calle' => 'calle',
+            'numero' => 'numero',
+            'municipio' => 'colonia',
+            'urbanizacion' => 'colonia2',
+            'ciudad' => 'municipio',
+            'estado' => 'estado',
+            'pais' => 'pais',
+            'precioVenta' => 'precioVenta',
+            'precioRenta' => 'precioRenta',
+            'infoExtraPrecio' => 'infoExtraPrecio',
+            'moneda' => 'moneda',
+            'enInternet' => 'enInternet',
+            'm2T' => 'm2T',
+            'm2C' => 'm2C',
+            'edad' => 'edad'
+        ];
+        
+        foreach ($camposOpcionales as $campoEspo => $campo21online) {
+            if (!empty($propiedadExterna[$campo21online])) {
+                $data[$campoEspo] = $propiedadExterna[$campo21online];
+            }
+        }
+        
+        return $data;
     }
 }

@@ -1,0 +1,206 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "required": false,
+            "trim": true,
+            "maxLength": 255,
+            "view": "views/fields/varchar"
+        },
+        "idOficina": {
+            "type": "link",
+            "view": "views/fields/link"
+        },
+        "fechaAlta": {
+            "type": "datetime",
+            "default": "javascript: return this.dateTime.getNow(1);"
+        },
+        "fechaModificacion": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "tipoOperacion": {
+            "type": "enum",
+            "options": ["Compartida", "Otros ingresos", "Referido", "Renta", "Venta"],
+            "default": "Venta",
+            "isSorted": true
+        },
+        "tipoPropiedad": {
+            "type": "enum",
+            "options": ["Comercial", "Habitacional", "Industrial", "Terreno", "Vacacional"],
+            "default": "Habitacional",
+            "isSorted": true
+        },
+        "subTipoPropiedad": {
+            "type": "varchar",
+            "maxLength": 150,
+            "trim": true
+        },
+        "tipoDeContrato": {
+            "type": "enum",
+            "options": ["Exclusiva", "Opcion", "Renta", "Venta"],
+            "default": "Exclusiva"
+        },
+        "status": {
+            "type": "enum",
+            "options": ["Borrador", "Cancelada", "Cerrada", "Con contrato firmado", "Con intencion", "En promocion", "Suspendida"],
+            "default": "Disponible",
+            "style": {
+                "Disponible": "success",
+                "Reservada": "warning",
+                "Vendida": "danger",
+                "Rentada": "info",
+                "Retirada": "default"
+            }
+        },
+        "idAsesorExclusiva": {
+            "type": "link",
+            "view": "views/fields/link"
+        },
+        "comision": {
+            "type": "float",
+            "min": 0,
+            "max": 100,
+            "default": 0
+        },
+        "precioEnContrato": {
+            "type": "currency",
+            "min": 0
+        },
+        "monedaEnContrato": {
+            "type": "enum",
+            "options": ["USD", "VES", "EUR"],
+            "default": "USD"
+        },
+        "calle": {
+            "type": "varchar",
+            "maxLength": 255,
+            "trim": true
+        },
+        "numero": {
+            "type": "varchar",
+            "maxLength": 50,
+            "trim": true
+        },
+        "municipio": {
+            "type": "varchar",
+            "maxLength": 150,
+            "trim": true
+        },
+        "urbanizacion": {
+            "type": "varchar",
+            "maxLength": 150,
+            "trim": true
+        },
+        "ciudad": {
+            "type": "varchar",
+            "maxLength": 150,
+            "trim": true
+        },
+        "estado": {
+            "type": "varchar",
+            "maxLength": 150,
+            "trim": true
+        },
+        "pais": {
+            "type": "enum",
+            "options": ["Venezuela"],
+            "default": "Venezuela"
+        },
+        "precioVenta": {
+            "type": "currency",
+            "min": 0
+        },
+        "precioRenta": {
+            "type": "currency",
+            "min": 0
+        },
+        "infoExtraPrecio": {
+            "type": "text",
+            "rows": 3
+        },
+        "moneda": {
+            "type": "enum",
+            "options": ["USD", "VES", "EUR"],
+            "default": "USD"
+        },
+        "enInternet": {
+            "type": "bool",
+            "default": false
+        },
+        "m2T": {
+            "type": "float",
+            "min": 0
+        },
+        "m2C": {
+            "type": "float",
+            "min": 0
+        },
+        "edad": {
+            "type": "int",
+            "min": 0
+        },
+        "deleted": {
+            "type": "bool",
+            "default": false
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "assignedUser": {
+            "type": "link",
+            "view": "views/fields/user"
+        },
+        "teams": {
+            "type": "linkMultiple",
+            "view": "views/fields/teams"
+        }
+    },
+    "links": {
+        "idOficina": {
+            "type": "belongsTo",
+            "entity": "Team"
+        },
+        "idAsesorExclusiva": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "assignedUser": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "teams": {
+            "type": "hasMany",
+            "entity": "Team",
+            "relationName": "EntityTeam",
+            "layoutRelationshipsDisabled": true
+        }
+    },
+    "collection": {
+        "orderBy": "createdAt",
+        "order": "desc"
+    }
+}

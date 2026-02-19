@@ -1,155 +1,168 @@
 <?php
-
 namespace Espo\Modules\Sincronizacion\Controllers;
 
+use Espo\Core\Controllers\Base;
 use Espo\Core\Api\Request;
-use Espo\Core\Api\Response;
-use Espo\Core\Exceptions\BadRequest;
+use Espo\Core\Record\ServiceContainer as RecordServiceContainer;
 use Espo\Core\InjectableFactory;
-use Espo\ORM\EntityManager;
+use Espo\Core\Utils\Log;
 
-/**
- * Controlador API para el panel de sincronización
- */
-class SyncPanel
+class SyncPanel extends Base
 {
+    private RecordServiceContainer $recordServiceContainer;
     private InjectableFactory $injectableFactory;
-    private EntityManager $entityManager;
+    private Log $log;
     
     public function __construct(
+        RecordServiceContainer $recordServiceContainer,
         InjectableFactory $injectableFactory,
-        EntityManager $entityManager
+        Log $log
     ) {
+        $this->recordServiceContainer = $recordServiceContainer;
         $this->injectableFactory = $injectableFactory;
-        $this->entityManager = $entityManager;
+        $this->log = $log;
     }
     
-    /**
-     * POST /api/v1/SyncPanel/action/runSync
-     * Ejecutar sincronización manual de usuarios y teams
-     */
-    public function postActionRunSync(Request $request): bool
+    public function getActionTestConnection(Request $request): array
     {
         try {
-            error_log('[SyncPanel] Ejecutando sincronización manual de usuarios...');
-            
-            $job = $this->injectableFactory->create('Espo\\Modules\\Sincronizacion\\Jobs\\SincronizarUsuarios');
-            $job->run();
-            
-            error_log('[SyncPanel] Sincronización completada exitosamente');
-            return true;
-            
-        } catch (\Exception $e) {
-            error_log('[SyncPanel] Error en sincronización: ' . $e->getMessage());
-            throw new BadRequest('Error en sincronización: ' . $e->getMessage());
-        }
-    }
-    
-    /**
-     * POST /api/v1/SyncPanel/action/runSyncPropiedadesAnual
-     * Ejecutar sincronización anual de propiedades (últimos 12 meses)
-     */
-    public function postActionRunSyncPropiedadesAnual(Request $request): bool
-    {
-        try {
-            error_log('[SyncPanel] Ejecutando sincronización ANUAL de propiedades (últimos 12 meses)...');
-            
-            // Crear instancia del job
-            $job = $this->injectableFactory->create('Espo\\Modules\\Sincronizacion\\Jobs\\SincronizarPropiedades');
-            
-            // Forzar tipo anual mediante variable de entorno temporal
-            putenv('FORCE_SYNC_TYPE=anual');
-            
-            $job->run();
-            
-            putenv('FORCE_SYNC_TYPE=');
-            
-            error_log('[SyncPanel] Sincronización anual de propiedades completada');
-            return true;
-            
-        } catch (\Exception $e) {
-            error_log('[SyncPanel] Error en sincronización anual: ' . $e->getMessage());
-            throw new BadRequest('Error en sincronización anual: ' . $e->getMessage());
-        }
-    }
-    
-    /**
-     * POST /api/v1/SyncPanel/action/runSyncPropiedadesCompleta
-     * Ejecutar sincronización completa de propiedades (todos los registros)
-     */
-    public function postActionRunSyncPropiedadesCompleta(Request $request): bool
-    {
-        try {
-            error_log('[SyncPanel] Ejecutando sincronización COMPLETA de propiedades...');
-            
-            // Crear instancia del job
-            $job = $this->injectableFactory->create('Espo\\Modules\\Sincronizacion\\Jobs\\SincronizarPropiedades');
-            
-            // Forzar tipo completa mediante variable de entorno temporal
-            putenv('FORCE_SYNC_TYPE=completa');
-            
-            $job->run();
-            
-            putenv('FORCE_SYNC_TYPE=');
-            
-            error_log('[SyncPanel] Sincronización completa de propiedades finalizada');
-            return true;
-            
-        } catch (\Exception $e) {
-            error_log('[SyncPanel] Error en sincronización completa: ' . $e->getMessage());
-            throw new BadRequest('Error en sincronización completa: ' . $e->getMessage());
-        }
-    }
-    
-    /**
-     * GET /api/v1/SyncPanel/action/getStatus
-     * Obtener estado actual de las sincronizaciones
-     */
-    public function getActionGetStatus(Request $request): array
-    {
-        try {
-            $config = $this->entityManager->getRDBRepository('SyncConfig')
-                ->where(['isActive' => true])
-                ->findOne();
+            $service = $this->recordServiceContainer->get('ExternalDbConfig');
+            $config = $service->getActiveConfigDecrypted();
             
             if (!$config) {
                 return [
-                    'hasConfig' => false,
-                    'message' => 'No hay configuración activa'
+                    'success' => false,
+                    'message' => 'No hay configuración activa. Por favor, crea y activa una configuración primero.'
                 ];
             }
             
-            // Obtener últimos logs
-            $logs = $this->entityManager->getRDBRepository('SyncLog')
-                ->where(['configId' => $config->getId()])
-                ->order('syncDate', 'DESC')
-                ->limit(0, 10)
-                ->find();
-            
-            $logsArray = [];
-            foreach ($logs as $log) {
-                $logsArray[] = [
-                    'date' => $log->get('syncDate'),
-                    'entity' => $log->get('entityType'),
-                    'action' => $log->get('action'),
-                    'status' => $log->get('status'),
-                    'message' => $log->get('message')
+            try {
+                $dsn = "mysql:host={$config['host']};port={$config['port']};dbname={$config['database']};charset=utf8mb4";
+                
+                $pdo = new \PDO(
+                    $dsn,
+                    $config['username'],
+                    $config['password'],
+                    [
+                        \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                        \PDO::ATTR_TIMEOUT => 5
+                    ]
+                );
+                
+                $stmt = $pdo->query("SELECT COUNT(*) as total FROM usuarios WHERE isActive = 1");
+                $users = $stmt->fetch(\PDO::FETCH_ASSOC);
+                
+                $stmt = $pdo->query("SELECT COUNT(*) as total FROM afiliados WHERE isActive = 1");
+                $teams = $stmt->fetch(\PDO::FETCH_ASSOC);
+                
+                $pdo = null;
+                
+                return [
+                    'success' => true,
+                    'message' => 'Conexión exitosa a la base de datos externa',
+                    'data' => [
+                        'config' => $config['name'],
+                        'userCount' => $users['total'] ?? 0,
+                        'teamCount' => $teams['total'] ?? 0
+                    ]
+                ];
+                
+            } catch (\PDOException $e) {
+                return [
+                    'success' => false,
+                    'message' => 'Error de conexión a BD: ' . $e->getMessage()
                 ];
             }
+            
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'message' => 'Error: ' . $e->getMessage()
+            ];
+        }
+    }
+    
+    public function postActionRunSync(Request $request): array
+    {
+        try {
+            $service = $this->recordServiceContainer->get('ExternalDbConfig');
+            $config = $service->getActiveConfigDecrypted();
+            
+            if (!$config) {
+                return [
+                    'success' => false,
+                    'message' => 'No hay configuración activa. Por favor, crea y activa una configuración primero.'
+                ];
+            }
+            
+            set_time_limit(600);
+            ini_set('memory_limit', '512M');
+            
+            $job = $this->injectableFactory->create(
+                'Espo\\Modules\\Sincronizacion\\Jobs\\SincronizarDatosExternos'
+            );
+            
+            ob_start();
+            $job->run();
+            ob_end_clean();
             
             return [
-                'hasConfig' => true,
-                'configName' => $config->get('name'),
-                'lastSyncDate' => $config->get('lastSyncDate'),
-                'lastSyncStatus' => $config->get('lastSyncStatus'),
-                'recentLogs' => $logsArray
+                'success' => true,
+                'message' => 'Sincronización de usuarios ejecutada correctamente. Revisa los logs de sincronización para ver los detalles.'
             ];
             
         } catch (\Exception $e) {
-            error_log('[SyncPanel] Error obteniendo estado: ' . $e->getMessage());
             return [
-                'hasConfig' => false,
-                'error' => $e->getMessage()
+                'success' => false,
+                'message' => 'Error al ejecutar sincronización: ' . $e->getMessage()
+            ];
+        }
+    }
+    
+    public function postActionSyncPropiedades(Request $request): array
+    {
+        try {
+            $data = $request->getParsedBody();
+            $tipo = $data->tipo ?? 'anual';
+            
+            $service = $this->recordServiceContainer->get('ExternalDbConfig');
+            $config = $service->getActiveConfigDecrypted();
+            
+            if (!$config) {
+                return [
+                    'success' => false,
+                    'message' => 'No hay configuración activa. Por favor, crea y activa una configuración primero.'
+                ];
+            }
+            
+            set_time_limit(1800);
+            ini_set('memory_limit', '1024M');
+            
+            $job = $this->injectableFactory->create(
+                'Espo\\Modules\\Sincronizacion\\Jobs\\SincronizarPropiedades'
+            );
+            
+            ob_start();
+            $job->run(['tipo' => $tipo]);
+            ob_end_clean();
+            
+            $mensaje = $tipo === 'anual' 
+                ? 'Sincronización de propiedades (últimos 12 meses) ejecutada correctamente.'
+                : 'Sincronización completa de propiedades ejecutada correctamente.';
+            
+            return [
+                'success' => true,
+                'message' => $mensaje . ' Revisa los logs de sincronización para ver los detalles.',
+                'details' => [
+                    'Tipo de sincronización: ' . ucfirst($tipo),
+                    'Ver detalles en: Menu > Logs de Sincronización'
+                ]
+            ];
+            
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'message' => 'Error al sincronizar propiedades: ' . $e->getMessage()
             ];
         }
     }
