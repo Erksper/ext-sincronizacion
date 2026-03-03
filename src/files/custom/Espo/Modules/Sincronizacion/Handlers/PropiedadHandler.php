@@ -39,6 +39,12 @@ class PropiedadHandler
         'infoExtraPrecio'
     ];
     
+    // Campos URL (se comparan tal cual, sin normalización adicional)
+    private array $urlFields = [
+        'linkPublico',
+        'link21Online'
+    ];
+    
     public function __construct(EntityManager $entityManager)
     {
         $this->entityManager = $entityManager;
@@ -369,6 +375,10 @@ class PropiedadHandler
             return StringUtils::normalizeAddress($value);
         }
         
+        if (in_array($field, $this->urlFields)) {
+            return trim((string)$value);
+        }
+        
         return StringUtils::normalize($value);
     }
     
@@ -383,6 +393,8 @@ class PropiedadHandler
             ? $propiedadExterna['fechaAlta']
             : date('Y-m-d H:i:s');
         
+        $propiedadId = (string)$propiedadExterna['id'];
+        
         $data = [
             'name' => $name,
             'idOficinaId' => (string)$propiedadExterna['idAfiliados'],
@@ -393,7 +405,9 @@ class PropiedadHandler
             'tipoDeContrato' => $propiedadExterna['tipoDeContrato'],
             'status' => $propiedadExterna['status'],
             'idAsesorExclusivaId' => (string)$propiedadExterna['idAsesorExclusiva'],
-            'assignedUserId' => (string)$propiedadExterna['idAsesorExclusiva']
+            'assignedUserId' => (string)$propiedadExterna['idAsesorExclusiva'],
+            'linkPublico' => 'https://www.century21.com.ve/v/resultados/ordenado-por_relevancia/por_' . $propiedadId,
+            'link21Online' => 'https://venezuela.21online.lat/propiedades/editar/' . $propiedadId,
         ];
         
         $camposOpcionales = [
