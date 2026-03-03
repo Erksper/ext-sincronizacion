@@ -203,6 +203,9 @@ class PropiedadHandler
             
             $this->entityManager->saveEntity($propiedad);
             
+            // Asignar equipos del asesor a la propiedad
+            $this->assignTeamsFromAssignedUser($propiedad, $propiedadData['assignedUserId']);
+            
             $summary['propiedades']['created']++;
             
             $this->log('created', 'Propiedades', $propiedadId, $propiedadData['name'], 'success',
@@ -249,6 +252,9 @@ class PropiedadHandler
             try {
                 $this->entityManager->saveEntity($propiedad);
                 
+                // Reasignar equipos del asesor (podría haber cambiado el asesor o los equipos)
+                $this->assignTeamsFromAssignedUser($propiedad, $propiedadData['assignedUserId']);
+                
                 $summary['propiedades']['updated']++;
                 $changesStr = implode(', ', $changes);
                 
@@ -262,8 +268,83 @@ class PropiedadHandler
                 throw $e;
             }
         } else {
-            $summary['propiedades']['no_changes']++;
+            // Aún si no hay cambios en los campos, podrían haber cambiado los equipos del asesor
+            // Verificamos si los equipos actuales difieren de los del asesor
+            $currentTeamIds = $this->getCurrentTeamIds($propiedad);
+            $newTeamIds = $this->getAssignedUserTeamIds($propiedadData['assignedUserId']);
+            
+            if ($this->teamListsDiffer($currentTeamIds, $newTeamIds)) {
+                $this->assignTeamsFromAssignedUser($propiedad, $propiedadData['assignedUserId']);
+                $summary['propiedades']['updated']++; // Lo consideramos una actualización aunque solo sean equipos
+                $this->log('updated', 'Propiedades', $propiedad->getId(), $propiedadData['name'], 'success',
+                          "Equipos actualizados", $configId);
+            } else {
+                $summary['propiedades']['no_changes']++;
+            }
         }
+    }
+    
+    /**
+     * Asigna los equipos del usuario asesor a la propiedad.
+     */
+    private function assignTeamsFromAssignedUser($propiedad, string $assignedUserId): void
+    {
+        $teamIds = $this->getAssignedUserTeamIds($assignedUserId);
+        
+        if (!empty($teamIds)) {
+            $propiedad->set('teamsIds', $teamIds);
+            $this->entityManager->saveEntity($propiedad);
+        }
+    }
+    
+    /**
+     * Obtiene los IDs de los equipos del usuario asesor (incluyendo el equipo por defecto).
+     */
+    private function getAssignedUserTeamIds(string $assignedUserId): array
+    {
+        $asesor = $this->entityManager->getEntityById('User', $assignedUserId);
+        if (!$asesor) {
+            return [];
+        }
+        
+        $teamIds = [];
+        $teams = $asesor->get('teams');
+        if ($teams) {
+            foreach ($teams as $team) {
+                $teamIds[] = $team->getId();
+            }
+        }
+        $defaultTeamId = $asesor->get('defaultTeamId');
+        if ($defaultTeamId && !in_array($defaultTeamId, $teamIds)) {
+            $teamIds[] = $defaultTeamId;
+        }
+        
+        return $teamIds;
+    }
+    
+    /**
+     * Obtiene los IDs de los equipos actualmente asignados a la propiedad.
+     */
+    private function getCurrentTeamIds($propiedad): array
+    {
+        $currentTeams = $propiedad->get('teams');
+        $ids = [];
+        if ($currentTeams) {
+            foreach ($currentTeams as $team) {
+                $ids[] = $team->getId();
+            }
+        }
+        return $ids;
+    }
+    
+    /**
+     * Compara dos listas de IDs de equipos.
+     */
+    private function teamListsDiffer(array $list1, array $list2): bool
+    {
+        sort($list1);
+        sort($list2);
+        return $list1 !== $list2;
     }
     
     /**
@@ -271,28 +352,23 @@ class PropiedadHandler
      */
     private function normalizeValue($value, string $field): string
     {
-        // Si es null, devolvemos string vacío
         if ($value === null) {
             return '';
         }
         
         if (in_array($field, $this->booleanFields)) {
-            // Booleano: convertir a '0' o '1'
             return $value ? '1' : '0';
         }
         
         if (in_array($field, $this->numericFields)) {
-            // Numérico: convertir a float y formatear con 2 decimales
             $float = floatval($value);
             return number_format($float, 2, '.', '');
         }
         
         if (in_array($field, $this->addressFields)) {
-            // Dirección: limpiar signos de puntuación y normalizar
             return StringUtils::normalizeAddress($value);
         }
         
-        // Otros campos de texto: normalización simple
         return StringUtils::normalize($value);
     }
     
