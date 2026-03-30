@@ -1,0 +1,7 @@
+{
+    "controller": "record",
+    "iconClass": "fas fa-handshake",
+    "color": "#27ae60",
+    "filterList": ["all"],
+    "modalDetailView": false
+}

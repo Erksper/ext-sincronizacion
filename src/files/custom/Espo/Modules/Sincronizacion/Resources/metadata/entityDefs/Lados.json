@@ -1,0 +1,85 @@
+{
+    "fields": {
+        "name": {
+            "type": "varchar",
+            "readOnly": true,
+            "maxLength": 255,
+            "view": "views/fields/varchar"
+        },
+        "tipoLado": {
+            "type": "enum",
+            "options": ["", "cierre", "obtencion"],
+            "default": "",
+            "style": {
+                "cierre": "success",
+                "obtencion": "info"
+            }
+        },
+        "porcentaje": {
+            "type": "float",
+            "min": 0,
+            "max": 100,
+            "default": 0
+        },
+        "asesorPrincipal": {
+            "type": "bool",
+            "default": false
+        },
+        "propiedad": {
+            "type": "link",
+            "view": "views/fields/link"
+        },
+        "asesor": {
+            "type": "link",
+            "view": "views/fields/link"
+        },
+        "oficina": {
+            "type": "link",
+            "view": "views/fields/link"
+        },
+        "createdAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "modifiedAt": {
+            "type": "datetime",
+            "readOnly": true
+        },
+        "createdBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        },
+        "modifiedBy": {
+            "type": "link",
+            "readOnly": true,
+            "view": "views/fields/user"
+        }
+    },
+    "links": {
+        "propiedad": {
+            "type": "belongsTo",
+            "entity": "Propiedades"
+        },
+        "asesor": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "oficina": {
+            "type": "belongsTo",
+            "entity": "Team"
+        },
+        "createdBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "modifiedBy": {
+            "type": "belongsTo",
+            "entity": "User"
+        }
+    },
+    "collection": {
+        "orderBy": "createdAt",
+        "order": "desc"
+    }
+}

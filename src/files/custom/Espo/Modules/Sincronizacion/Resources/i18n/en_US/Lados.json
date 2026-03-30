@@ -1,0 +1,27 @@
+{
+    "labels": {
+        "Create Lados": "Create Side",
+        "Lados": "Side",
+        "Lados list": "Sides"
+    },
+    "fields": {
+        "name": "Name",
+        "tipoLado": "Side Type",
+        "porcentaje": "Percentage",
+        "asesorPrincipal": "Main Advisor",
+        "propiedad": "Property",
+        "asesor": "Advisor",
+        "oficina": "Office",
+        "createdAt": "Created At",
+        "modifiedAt": "Modified At",
+        "createdBy": "Created By",
+        "modifiedBy": "Modified By"
+    },
+    "options": {
+        "tipoLado": {
+            "": "",
+            "cierre": "Closing",
+            "obtencion": "Acquisition"
+        }
+    }
+}

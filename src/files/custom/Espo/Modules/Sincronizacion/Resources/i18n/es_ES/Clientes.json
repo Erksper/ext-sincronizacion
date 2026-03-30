@@ -1,0 +1,50 @@
+{
+    "labels": {
+        "Create Clientes": "Crear Cliente",
+        "Clientes": "Cliente",
+        "Clientes list": "Clientes"
+    },
+    "fields": {
+        "name": "Nombre Completo",
+        "firstName": "Nombre",
+        "lastName": "Apellidos",
+        "titulo": "Título",
+        "tipoCliente": "Tipo de Cliente",
+        "genero": "Género",
+        "estadoCivil": "Estado Civil",
+        "status": "Estado",
+        "emailAddress": "Email",
+        "celular": "Celular",
+        "telCasa": "Tel. Casa",
+        "telOfna": "Tel. Oficina",
+        "fechaAlta": "Fecha de Alta",
+        "fechaNacimiento": "Fecha de Nacimiento",
+        "fechaModificacion": "Fecha de Modificación",
+        "etiquetas": "Etiquetas",
+        "oficina": "Oficina",
+        "asesor": "Asesor",
+        "assignedUser": "Asignado a",
+        "teams": "Equipos",
+        "createdAt": "Fecha Creación",
+        "modifiedAt": "Fecha Modificación",
+        "createdBy": "Creado Por",
+        "modifiedBy": "Modificado Por"
+    },
+    "options": {
+        "tipoCliente": {
+            "": "",
+            "fisica": "Persona Física",
+            "moral": "Persona Moral"
+        },
+        "genero": {
+            "": "",
+            "m": "Masculino",
+            "f": "Femenino"
+        },
+        "status": {
+            "enCartera": "En Cartera",
+            "inactivo": "Inactivo",
+            "enSeguimiento": "En Seguimiento"
+        }
+    }
+}

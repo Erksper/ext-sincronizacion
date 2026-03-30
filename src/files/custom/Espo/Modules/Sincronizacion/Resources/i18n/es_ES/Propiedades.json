@@ -1,0 +1,109 @@
+{
+    "labels": {
+        "Create Propiedades": "Crear Propiedad",
+        "Propiedades": "Propiedad",
+        "Propiedades list": "Propiedades"
+    },
+    "fields": {
+        "name": "Nombre",
+        "idOficina": "Oficina",
+        "fechaAlta": "Fecha de Alta",
+        "fechaModificacion": "Fecha de Modificación",
+        "tipoOperacion": "Tipo de Operación",
+        "tipoPropiedad": "Tipo de Propiedad",
+        "subTipoPropiedad": "Subtipo de Propiedad",
+        "tipoDeContrato": "Tipo de Contrato",
+        "status": "Estado",
+        "idAsesorExclusiva": "Asesor Exclusiva",
+        "comision": "Comisión (%)",
+        "precioEnContrato": "Precio en Contrato",
+        "monedaEnContrato": "Moneda en Contrato",
+        "calle": "Calle",
+        "numero": "Número",
+        "municipio": "Municipio",
+        "urbanizacion": "Urbanización",
+        "ciudad": "Ciudad",
+        "estado": "Estado/Región",
+        "pais": "País",
+        "precioVenta": "Precio de Venta",
+        "precioRenta": "Precio de Renta",
+        "infoExtraPrecio": "Info Extra Precio",
+        "moneda": "Moneda",
+        "enInternet": "En Internet",
+        "m2T": "M² Terreno",
+        "m2C": "M² Construcción",
+        "edad": "Antigüedad (años)",
+        "linkPublico": "Link Público",
+        "link21Online": "Link 21Online",
+        "clave": "Clave",
+        "tipoCierre": "Tipo de Cierre",
+        "fechaCV": "Fecha C/V",
+        "fechaEstimadaCierre": "Fecha Estimada de Cierre",
+        "fechaCierre": "Fecha de Cierre",
+        "idAsesorCierre": "Asesor de Cierre",
+        "operacionCompartida": "Operación Compartida",
+        "idAfiliadosCompartida": "Oficina Compartida",
+        "idClientesComprador": "Cliente Comprador",
+        "idClientesVendedor": "Cliente Vendedor",
+        "compartidoCon": "Compartido Con",
+        "compartidoConC21": "Compartido con C21",
+        "referidoConC21": "Referido con C21",
+        "idAfiliadosReferida": "Oficina Referida",
+        "precioCierre": "Precio de Cierre",
+        "assignedUser": "Asignado a",
+        "teams": "Equipos",
+        "createdAt": "Fecha Creación",
+        "modifiedAt": "Fecha Modificación",
+        "createdBy": "Creado Por",
+        "modifiedBy": "Modificado Por"
+    },
+    "options": {
+        "tipoOperacion": {
+            "Compartida": "Compartida",
+            "Otros ingresos": "Otros Ingresos",
+            "Referido": "Referido",
+            "Renta": "Renta",
+            "Venta": "Venta"
+        },
+        "tipoPropiedad": {
+            "Comercial": "Comercial",
+            "Habitacional": "Habitacional",
+            "Industrial": "Industrial",
+            "Terreno": "Terreno",
+            "Vacacional": "Vacacional"
+        },
+        "tipoDeContrato": {
+            "Exclusiva": "Exclusiva",
+            "Opcion": "Opción",
+            "Renta": "Renta",
+            "Venta": "Venta"
+        },
+        "status": {
+            "Borrador": "Borrador",
+            "Cancelada": "Cancelada",
+            "Cerrada": "Cerrada",
+            "Con contrato firmado": "Con Contrato Firmado",
+            "Con intencion": "Con Intención",
+            "En promocion": "En Promoción",
+            "Suspendida": "Suspendida"
+        },
+        "monedaEnContrato": {
+            "USD": "USD",
+            "VES": "VES",
+            "EUR": "EUR"
+        },
+        "moneda": {
+            "USD": "USD",
+            "VES": "VES",
+            "EUR": "EUR"
+        },
+        "pais": {
+            "Venezuela": "Venezuela"
+        },
+        "tipoCierre": {
+            "": "",
+            "venta": "Venta",
+            "renta": "Renta"
+        }
+    }
+}

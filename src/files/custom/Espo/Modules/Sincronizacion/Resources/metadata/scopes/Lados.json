@@ -1,0 +1,16 @@
+{
+    "entity": true,
+    "layouts": true,
+    "module": "Sincronizacion",
+    "type": "Base",
+    "isCustom": true,
+    "isAdmin": false,
+    "tab": true,
+    "acl": true,
+    "customizable": true,
+    "importable": false,
+    "notifications": false,
+    "stream": false,
+    "disabled": false,
+    "object": true
+}

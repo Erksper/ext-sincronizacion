@@ -1,0 +1,50 @@
+{
+    "labels": {
+        "Create Clientes": "Create Client",
+        "Clientes": "Client",
+        "Clientes list": "Clients"
+    },
+    "fields": {
+        "name": "Full Name",
+        "firstName": "First Name",
+        "lastName": "Last Name",
+        "titulo": "Title",
+        "tipoCliente": "Client Type",
+        "genero": "Gender",
+        "estadoCivil": "Marital Status",
+        "status": "Status",
+        "emailAddress": "Email",
+        "celular": "Mobile",
+        "telCasa": "Home Phone",
+        "telOfna": "Office Phone",
+        "fechaAlta": "Registration Date",
+        "fechaNacimiento": "Date of Birth",
+        "fechaModificacion": "Last Modified",
+        "etiquetas": "Tags",
+        "oficina": "Office",
+        "asesor": "Advisor",
+        "assignedUser": "Assigned To",
+        "teams": "Teams",
+        "createdAt": "Created At",
+        "modifiedAt": "Modified At",
+        "createdBy": "Created By",
+        "modifiedBy": "Modified By"
+    },
+    "options": {
+        "tipoCliente": {
+            "": "",
+            "fisica": "Individual",
+            "moral": "Company"
+        },
+        "genero": {
+            "": "",
+            "m": "Male",
+            "f": "Female"
+        },
+        "status": {
+            "enCartera": "In Portfolio",
+            "inactivo": "Inactive",
+            "enSeguimiento": "Following Up"
+        }
+    }
+}

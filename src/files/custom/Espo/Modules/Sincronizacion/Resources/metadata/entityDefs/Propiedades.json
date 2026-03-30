@@ -150,6 +150,66 @@
             "maxLength": 500,
             "strip": true
         },
+        "clave": {
+            "type": "varchar",
+            "maxLength": 50,
+            "trim": true
+        },
+        "tipoCierre": {
+            "type": "enum",
+            "options": ["", "venta", "renta"],
+            "default": ""
+        },
+        "fechaCV": {
+            "type": "date"
+        },
+        "fechaEstimadaCierre": {
+            "type": "date"
+        },
+        "fechaCierre": {
+            "type": "date"
+        },
+        "idAsesorCierre": {
+            "type": "link",
+            "view": "views/fields/link"
+        },
+        "operacionCompartida": {
+            "type": "varchar",
+            "maxLength": 100,
+            "trim": true
+        },
+        "idAfiliadosCompartida": {
+            "type": "link",
+            "view": "views/fields/link"
+        },
+        "idClientesComprador": {
+            "type": "link",
+            "view": "views/fields/link"
+        },
+        "idClientesVendedor": {
+            "type": "link",
+            "view": "views/fields/link"
+        },
+        "compartidoCon": {
+            "type": "text",
+            "rows": 3
+        },
+        "compartidoConC21": {
+            "type": "bool",
+            "default": false
+        },
+        "referidoConC21": {
+            "type": "bool",
+            "default": false
+        },
+        "idAfiliadosReferida": {
+            "type": "link",
+            "view": "views/fields/link"
+        },
+        "precioCierre": {
+            "type": "currency",
+            "min": 0
+        },
         "deleted": {
             "type": "bool",
             "default": false
@@ -189,6 +249,31 @@
         "idAsesorExclusiva": {
             "type": "belongsTo",
             "entity": "User"
+        },
+        "idAsesorCierre": {
+            "type": "belongsTo",
+            "entity": "User"
+        },
+        "idAfiliadosCompartida": {
+            "type": "belongsTo",
+            "entity": "Team"
+        },
+        "idAfiliadosReferida": {
+            "type": "belongsTo",
+            "entity": "Team"
+        },
+        "idClientesComprador": {
+            "type": "belongsTo",
+            "entity": "Clientes"
+        },
+        "idClientesVendedor": {
+            "type": "belongsTo",
+            "entity": "Clientes"
+        },
+        "lados": {
+            "type": "hasMany",
+            "entity": "Lados",
+            "foreign": "propiedad"
         },
         "createdBy": {
             "type": "belongsTo",

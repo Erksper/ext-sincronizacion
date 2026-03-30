@@ -1,0 +1,27 @@
+{
+    "labels": {
+        "Create Lados": "Crear Lado",
+        "Lados": "Lado",
+        "Lados list": "Lados"
+    },
+    "fields": {
+        "name": "Nombre",
+        "tipoLado": "Tipo de Lado",
+        "porcentaje": "Porcentaje",
+        "asesorPrincipal": "Asesor Principal",
+        "propiedad": "Propiedad",
+        "asesor": "Asesor",
+        "oficina": "Oficina",
+        "createdAt": "Fecha Creación",
+        "modifiedAt": "Fecha Modificación",
+        "createdBy": "Creado Por",
+        "modifiedBy": "Modificado Por"
+    },
+    "options": {
+        "tipoLado": {
+            "": "",
+            "cierre": "Cierre",
+            "obtencion": "Obtención"
+        }
+    }
+}

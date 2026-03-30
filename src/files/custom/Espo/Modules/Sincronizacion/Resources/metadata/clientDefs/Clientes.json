@@ -1,0 +1,8 @@
+{
+    "controller": "record",
+    "iconClass": "fas fa-user",
+    "color": "#3498db",
+    "boolFilterList": ["onlyMy"],
+    "filterList": ["all"],
+    "modalDetailView": false
+}
