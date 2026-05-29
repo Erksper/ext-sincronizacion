@@ -4,7 +4,6 @@ namespace Espo\Modules\Sincronizacion\Jobs;
 use Espo\Core\Job\JobDataLess;
 use Espo\Core\InjectableFactory;
 use Espo\ORM\EntityManager;
-use Espo\Core\Utils\PasswordHash;
 use Espo\Modules\Sincronizacion\Handlers\TeamHandler;
 use Espo\Modules\Sincronizacion\Handlers\UserHandler;
 use Espo\Modules\Sincronizacion\Handlers\ImageHandler;
@@ -58,14 +57,16 @@ class SincronizarDatosExternos implements JobDataLess
                 return;
             }
             
-            $sqlUsuarios = "SELECT id, idAfiliados, nombre, apellidoM, apellidoP, username, password, email, telMovil, puesto, fotoPath 
+            // Consulta de usuarios activos (sin campo password)
+            $sqlUsuarios = "SELECT id, idAfiliados, nombre, apellidoM, apellidoP, username, email, telMovil, puesto, fotoPath 
                         FROM usuarios 
                         WHERE isActive = 1 AND idAfiliados IS NOT NULL";
             $stmtUsuarios = $pdo->prepare($sqlUsuarios);
             $stmtUsuarios->execute();
             $usuariosExternos = $stmtUsuarios->fetchAll(PDO::FETCH_ASSOC);
             
-            $sqlUsuariosInactivos = "SELECT id, idAfiliados, nombre, apellidoM, apellidoP, username, password, email, telMovil, puesto, fotoPath 
+            // Consulta de usuarios inactivos (sin campo password)
+            $sqlUsuariosInactivos = "SELECT id, idAfiliados, nombre, apellidoM, apellidoP, username, email, telMovil, puesto, fotoPath 
                                 FROM usuarios 
                                 WHERE isActive = 0 AND idAfiliados IS NOT NULL";
             $stmtUsuariosInactivos = $pdo->prepare($sqlUsuariosInactivos);
@@ -96,10 +97,10 @@ class SincronizarDatosExternos implements JobDataLess
                     ", Afiliados: " . count($afiliadosExternos) . 
                     ", Roles: " . count($rolesExternos), $config['id']);
             
-            $passwordHash = $this->injectableFactory->create(PasswordHash::class);
+            // Ya no se crea PasswordHash
             $imageHandler = new ImageHandler($this->entityManager);
             $teamHandler = new TeamHandler($this->entityManager);
-            $userHandler = new UserHandler($this->entityManager, $imageHandler, $teamHandler, $passwordHash);
+            $userHandler = new UserHandler($this->entityManager, $imageHandler, $teamHandler);
             
             $summary = [
                 'roles' => ['created' => 0, 'existing' => 0, 'errors' => 0],

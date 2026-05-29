@@ -217,9 +217,13 @@ class PropiedadHandler
             $propiedad->set('id', $propiedadId);
             $propiedad->set($propiedadData);
 
-            $this->entityManager->saveEntity($propiedad);
+            // Asignar equipos antes del primer guardado (solo creación)
+            $teamIds = $this->getValidTeamIds($propiedadData['assignedUserId']);
+            if (!empty($teamIds)) {
+                $propiedad->set('teamsIds', $teamIds);
+            }
 
-            $this->assignTeamsFromAssignedUser($propiedad, $propiedadData['assignedUserId']);
+            $this->entityManager->saveEntity($propiedad);
 
             $summary['propiedades']['created']++;
             $this->log('created', 'Propiedades', $propiedadId, $propiedadData['name'], 'success',
@@ -248,7 +252,11 @@ class PropiedadHandler
         $changes     = [];
         $needsUpdate = false;
 
+        // Comparar campos de datos (excepto equipos)
         foreach ($propiedadData as $field => $newValue) {
+            if ($field === 'teamsIds') {
+                continue;
+            }
             $currentValue = $propiedad->get($field);
             $currentNorm  = $this->normalizeValue($currentValue, $field);
             $newNorm      = $this->normalizeValue($newValue, $field);
@@ -260,15 +268,28 @@ class PropiedadHandler
             }
         }
 
+        // ---- Manejo de equipos con logging detallado ----
+        $oldTeamIds = $this->getCurrentTeamIds($propiedad);
+        $newTeamIds = $this->getValidTeamIds($propiedadData['assignedUserId']);
+        $teamsChanged = $this->teamListsDiffer($oldTeamIds, $newTeamIds);
+
+        if ($teamsChanged) {
+            // Generar descripción legible del cambio de equipos
+            $oldTeamsDesc = $this->getTeamDescriptions($oldTeamIds);
+            $newTeamsDesc = $this->getTeamDescriptions($newTeamIds);
+            $changes[] = "equipos (de [{$oldTeamsDesc}] a [{$newTeamsDesc}])";
+            
+            $propiedad->set('teamsIds', $newTeamIds);
+            $needsUpdate = true;
+        }
+
+        // Solo guardar si hay algún cambio
         if ($needsUpdate) {
             try {
                 $this->entityManager->saveEntity($propiedad);
-                $this->assignTeamsFromAssignedUser($propiedad, $propiedadData['assignedUserId']);
-
                 $summary['propiedades']['updated']++;
                 $this->log('updated', 'Propiedades', $propiedad->getId(), $propiedadData['name'], 'success',
                     'Propiedad actualizada: ' . implode(', ', $changes), $configId);
-
             } catch (\Exception $e) {
                 $summary['propiedades']['errors']++;
                 $this->log('error', 'Propiedades', $propiedad->getId(), $propiedadData['name'], 'error',
@@ -276,18 +297,7 @@ class PropiedadHandler
                 throw $e;
             }
         } else {
-            // Verificar si cambiaron los equipos del asesor aunque no haya otros cambios
-            $currentTeamIds = $this->getCurrentTeamIds($propiedad);
-            $newTeamIds     = $this->getAssignedUserTeamIds($propiedadData['assignedUserId']);
-
-            if ($this->teamListsDiffer($currentTeamIds, $newTeamIds)) {
-                $this->assignTeamsFromAssignedUser($propiedad, $propiedadData['assignedUserId']);
-                $summary['propiedades']['updated']++;
-                $this->log('updated', 'Propiedades', $propiedad->getId(), $propiedadData['name'], 'success',
-                    'Equipos actualizados', $configId);
-            } else {
-                $summary['propiedades']['no_changes']++;
-            }
+            $summary['propiedades']['no_changes']++;
         }
     }
 
@@ -394,54 +404,75 @@ class PropiedadHandler
     }
 
     // -------------------------------------------------------------------------
-    // Helpers de equipos
+    // Helpers de equipos (mejorados)
     // -------------------------------------------------------------------------
 
-    private function assignTeamsFromAssignedUser($propiedad, string $assignedUserId): void
+    /**
+     * Obtiene los IDs de los equipos asignados al usuario (solo los que existen en el sistema)
+     */
+    private function getValidTeamIds(string $assignedUserId): array
     {
-        $teamIds = $this->getAssignedUserTeamIds($assignedUserId);
-
-        if (!empty($teamIds)) {
-            $propiedad->set('teamsIds', $teamIds);
-            $this->entityManager->saveEntity($propiedad);
+        if (empty($assignedUserId)) {
+            return [];
         }
-    }
 
-    private function getAssignedUserTeamIds(string $assignedUserId): array
-    {
         $asesor = $this->entityManager->getEntityById('User', $assignedUserId);
         if (!$asesor) {
             return [];
         }
 
         $teamIds = [];
-        $teams   = $asesor->get('teams');
+        
+        // Equipos directos del usuario
+        $teams = $asesor->get('teams');
         if ($teams) {
             foreach ($teams as $team) {
-                $teamIds[] = $team->getId();
+                $id = $team->getId();
+                if ($this->teamExists($id)) {
+                    $teamIds[] = (string)$id;
+                }
             }
         }
 
+        // Equipo por defecto
         $defaultTeamId = $asesor->get('defaultTeamId');
-        if ($defaultTeamId && !in_array($defaultTeamId, $teamIds)) {
-            $teamIds[] = $defaultTeamId;
+        if ($defaultTeamId && $this->teamExists($defaultTeamId)) {
+            $defaultIdStr = (string)$defaultTeamId;
+            if (!in_array($defaultIdStr, $teamIds, true)) {
+                $teamIds[] = $defaultIdStr;
+            }
         }
 
-        return $teamIds;
+        return array_unique($teamIds);
     }
 
+    /**
+     * Verifica si un equipo existe en la base de datos
+     */
+    private function teamExists(string $teamId): bool
+    {
+        $team = $this->entityManager->getEntityById('Team', $teamId);
+        return $team !== null;
+    }
+
+    /**
+     * Obtiene los IDs actuales de los equipos de la propiedad
+     */
     private function getCurrentTeamIds($propiedad): array
     {
         $currentTeams = $propiedad->get('teams');
-        $ids          = [];
+        $ids = [];
         if ($currentTeams) {
             foreach ($currentTeams as $team) {
-                $ids[] = $team->getId();
+                $ids[] = (string)$team->getId();
             }
         }
-        return $ids;
+        return array_unique($ids);
     }
 
+    /**
+     * Compara dos listas de equipos (normalizadas)
+     */
     private function teamListsDiffer(array $list1, array $list2): bool
     {
         $list1 = array_unique(array_map('strval', $list1));
@@ -449,6 +480,29 @@ class PropiedadHandler
         sort($list1);
         sort($list2);
         return $list1 !== $list2;
+    }
+
+    /**
+     * Genera una descripción legible de una lista de IDs de equipos
+     * Ejemplo: "Llano Andes (CLA5), Caracas (CLA1)"
+     */
+    private function getTeamDescriptions(array $teamIds): string
+    {
+        if (empty($teamIds)) {
+            return 'ninguno';
+        }
+        
+        $descriptions = [];
+        foreach ($teamIds as $id) {
+            $team = $this->entityManager->getEntityById('Team', $id);
+            if ($team) {
+                $name = $team->get('name');
+                $descriptions[] = "{$name} ({$id})";
+            } else {
+                $descriptions[] = "ID:{$id} (desconocido)";
+            }
+        }
+        return implode(', ', $descriptions);
     }
 
     // -------------------------------------------------------------------------

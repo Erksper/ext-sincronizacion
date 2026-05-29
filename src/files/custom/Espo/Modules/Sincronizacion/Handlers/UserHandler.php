@@ -6,7 +6,6 @@ use Espo\Modules\Sincronizacion\Utils\StringUtils;
 use Espo\Modules\Sincronizacion\Handlers\ImageHandler;
 use Espo\Modules\Sincronizacion\Handlers\TeamHandler;
 use Espo\Modules\Sincronizacion\Traits\Loggable;
-use Espo\Core\Utils\PasswordHash;
 
 class UserHandler
 {
@@ -15,18 +14,15 @@ class UserHandler
     private EntityManager $entityManager;
     private ImageHandler $imageHandler;
     private TeamHandler $teamHandler;
-    private PasswordHash $passwordHash;
     
     public function __construct(
         EntityManager $entityManager,
         ImageHandler $imageHandler,
-        TeamHandler $teamHandler,
-        PasswordHash $passwordHash
+        TeamHandler $teamHandler
     ) {
         $this->entityManager = $entityManager;
         $this->imageHandler = $imageHandler;
         $this->teamHandler = $teamHandler;
-        $this->passwordHash = $passwordHash;
     }
     
     public function syncUsuarios(
@@ -161,8 +157,7 @@ class UserHandler
             $user->set('id', $userId);
             $user->set($userData);
             
-            $hashedPassword = $this->passwordHash->hash($usuarioExterno['password']);
-            $user->set('password', $hashedPassword);
+            // No se asigna contraseña (OAuth2)
             
             $this->entityManager->saveEntity($user);
             
@@ -243,18 +238,7 @@ class UserHandler
             $changes[] = "roles";
         }
         
-        if (!empty($usuarioExterno['password'])) {
-            $currentPasswordHash = $user->get('password');
-            $plainPassword = $usuarioExterno['password'];
-            $passwordChanged = empty($currentPasswordHash) || !password_verify($plainPassword, $currentPasswordHash);
-            
-            if ($passwordChanged) {
-                $hashedPassword = $this->passwordHash->hash($plainPassword);
-                $user->set('password', $hashedPassword);
-                $needsUpdate = true;
-                $changes[] = "password";
-            }
-        }
+        // Actualización de contraseña eliminada (OAuth2)
         
         $imageFieldName = $this->imageHandler->getImageFieldName();
         $fotoPath = $usuarioExterno['fotoPath'] ?? null;
@@ -533,12 +517,7 @@ class UserHandler
             return false;
         }
         
-        if (empty($usuarioExterno['password'])) {
-            $this->log('info', 'User', $usuarioExterno['id'], "id: ({$usuarioExterno['id']}) {$usuarioExterno['username']}", 'warning',
-                      "Usuario sin password", $configId);
-            $summary['users']['skipped']++;
-            return false;
-        }
+        // Validación de contraseña eliminada (OAuth2)
         
         if (empty($usuarioExterno['puesto'])) {
             $this->log('info', 'User', $usuarioExterno['id'], "id: ({$usuarioExterno['id']}) {$usuarioExterno['username']}", 'warning',
