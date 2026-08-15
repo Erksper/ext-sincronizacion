@@ -11,6 +11,10 @@ class UserHandler
 {
     use Loggable;
 
+    private const COOLDOWN_HOURS = 6;
+    private const LAST_UPDATE_FIELD = 'cActualizacion';
+    private const CHECKSUM_FIELD = 'cChecksum';
+
     private EntityManager $entityManager;
     private ImageHandler $imageHandler;
     private TeamHandler $teamHandler;
@@ -163,12 +167,15 @@ class UserHandler
             
             $imageFieldName = $this->imageHandler->getImageFieldName();
             $fotoPath = $usuarioExterno['fotoPath'] ?? null;
-            $imageResult = $this->imageHandler->processUserImage($fotoPath, null);
+            $imageResult = $this->imageHandler->processUserImage($fotoPath, null, null);
             
             if ($imageResult['imageId']) {
                 $user->set($imageFieldName, $imageResult['imageId']);
-                $this->entityManager->saveEntity($user);
+                $user->set(self::CHECKSUM_FIELD, $imageResult['checksum']);
             }
+
+            $user->set(self::LAST_UPDATE_FIELD, date('Y-m-d H:i:s'));
+            $this->entityManager->saveEntity($user);
             
             $this->assignUserToTeams($user, $teamId, $claId);
             
@@ -195,6 +202,14 @@ class UserHandler
     ): void {
         $username = $user->get('userName');
         $userId = $user->getId();
+
+        if ($this->isInCooldown($user)) {
+            $summary['users']['no_changes']++;
+            $this->log('info', 'User', $userId, "usuario: ({$userId}) {$username}", 'info',
+                      "Usuario omitido: actualizado hace menos de " . self::COOLDOWN_HOURS . " horas", $configId);
+            return;
+        }
+
         $changes = [];
         $needsUpdate = false;
         
@@ -242,20 +257,23 @@ class UserHandler
         
         $imageFieldName = $this->imageHandler->getImageFieldName();
         $fotoPath = $usuarioExterno['fotoPath'] ?? null;
-        $fotoUrlNueva = !empty($fotoPath) ? 'https://venezuela.21online.lat/' . ltrim($fotoPath, '/') : null;
-        $fotoUrlActual = $user->get('cFoto');
-        
-        if ($fotoUrlNueva !== $fotoUrlActual) {
-            $imageResult = $this->imageHandler->processUserImage($fotoPath, $user->get($imageFieldName));
-            
-            if ($imageResult['updated']) {
-                $user->set($imageFieldName, $imageResult['imageId']);
-                $needsUpdate = true;
-                $changes[] = "imagen";
-            }
+
+        $imageResult = $this->imageHandler->processUserImage(
+            $fotoPath,
+            $user->get($imageFieldName),
+            $user->get(self::CHECKSUM_FIELD)
+        );
+
+        if ($imageResult['updated']) {
+            $user->set($imageFieldName, $imageResult['imageId']);
+            $user->set(self::CHECKSUM_FIELD, $imageResult['checksum']);
+            $needsUpdate = true;
+            $changes[] = "imagen";
         }
         
         if ($needsUpdate) {
+            $user->set(self::LAST_UPDATE_FIELD, date('Y-m-d H:i:s'));
+
             $this->entityManager->saveEntity($user);
             
             if ($user->get('defaultTeamId') !== $teamId) {
@@ -272,9 +290,30 @@ class UserHandler
         }
     }
     
+    private function isInCooldown($user): bool
+    {
+        $lastUpdate = $user->get(self::LAST_UPDATE_FIELD);
+
+        if (empty($lastUpdate)) {
+            return false;
+        }
+
+        $lastUpdateTimestamp = strtotime((string)$lastUpdate);
+
+        if ($lastUpdateTimestamp === false) {
+            return false;
+        }
+
+        $limitTimestamp = strtotime('-' . self::COOLDOWN_HOURS . ' hours');
+
+        return $lastUpdateTimestamp > $limitTimestamp;
+    }
+
     private function updateUserRoles($user, array $rolesIds21online, array $rolesMap21online): bool
     {
-        $currentRoles = $user->get('roles');
+        $currentRoles = $this->entityManager->getRDBRepository('User')
+            ->getRelation($user, 'roles')
+            ->find();
         $currentRoleIds = [];
         if ($currentRoles) {
             foreach ($currentRoles as $role) {
@@ -374,7 +413,9 @@ class UserHandler
         }
         
         try {
-            $currentTeams = $user->get('teams');
+            $currentTeams = $this->entityManager->getRDBRepository('User')
+                ->getRelation($user, 'teams')
+                ->find();
             if ($currentTeams) {
                 foreach ($currentTeams as $currentTeam) {
                     $this->entityManager->getRDBRepository('User')

@@ -424,7 +424,9 @@ class PropiedadHandler
         $teamIds = [];
         
         // Equipos directos del usuario
-        $teams = $asesor->get('teams');
+        $teams = $this->entityManager->getRDBRepository('User')
+            ->getRelation($asesor, 'teams')
+            ->find();
         if ($teams) {
             foreach ($teams as $team) {
                 $id = $team->getId();
@@ -460,7 +462,9 @@ class PropiedadHandler
      */
     private function getCurrentTeamIds($propiedad): array
     {
-        $currentTeams = $propiedad->get('teams');
+        $currentTeams = $this->entityManager->getRDBRepository('Propiedades')
+            ->getRelation($propiedad, 'teams')
+            ->find();
         $ids = [];
         if ($currentTeams) {
             foreach ($currentTeams as $team) {
